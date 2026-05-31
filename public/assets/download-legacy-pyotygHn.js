@@ -1,0 +1,1 @@
+System.register(["./File-legacy-DY2W9lLq.js"],function(e,t){var n;return{setters:[function(e){n=e.t}],execute:function(){e("Download",n),e("default",n)}}});
