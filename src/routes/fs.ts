@@ -296,11 +296,12 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
       const driver = await getDriver(storage);
       const relativePath = getRelativePath(path, storage.mount_path);
       const result = await driver.list(relativePath, JSON.parse(storage.addition));
+      const files = Array.isArray(result.content) ? result.content : [];
 
       // Cache the results in D1
-      await cacheFilesToDB(storage.id, path, result.content, cacheExpiration, env);
+      await cacheFilesToDB(storage.id, path, files, cacheExpiration, env);
 
-      let content = result.content.map((f: any) => ({
+      let content = files.map((f: any) => ({
         name: f.name,
         size: f.size,
         is_dir: f.is_dir,
@@ -526,12 +527,13 @@ async function handleListDirs(request: Request, env: Env): Promise<Response> {
     const driver = await getDriver(storage);
     const relativePath = getRelativePath(path, storage.mount_path);
     const result = await driver.list(relativePath, JSON.parse(storage.addition));
+    const files = Array.isArray(result.content) ? result.content : [];
 
     // Cache results
     const cacheExpiration = storage.cache_expiration || 30;
-    await cacheFilesToDB(storage.id, path, result.content, cacheExpiration, env);
+    await cacheFilesToDB(storage.id, path, files, cacheExpiration, env);
 
-    const dirs = result.content
+    const dirs = files
       .filter((f: any) => f.is_dir)
       .map((f: any) => ({
         name: f.name,
