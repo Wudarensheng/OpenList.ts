@@ -115,15 +115,20 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
 
 // Get storage that matches the given path
 async function getStorageForPath(path: string, env: Env): Promise<any> {
-  const storages = await env.DB.prepare(
-    'SELECT * FROM storages WHERE disabled = 0 ORDER BY mount_path DESC'
-  ).all();
+  try {
+    const storages = await env.DB.prepare(
+      'SELECT * FROM storages WHERE disabled = 0 ORDER BY mount_path DESC'
+    ).all();
 
-  for (const storage of storages.results) {
-    const mountPath = (storage as any).mount_path;
-    if (path.startsWith(mountPath) || mountPath === '/') {
-      return storage;
+    const results = Array.isArray(storages.results) ? storages.results : [];
+    for (const storage of results) {
+      const mountPath = (storage as any).mount_path;
+      if (path.startsWith(mountPath) || mountPath === '/') {
+        return storage;
+      }
     }
+  } catch (e) {
+    console.error('getStorageForPath error:', e);
   }
 
   return null;
@@ -131,10 +136,14 @@ async function getStorageForPath(path: string, env: Env): Promise<any> {
 
 // Get all storages
 async function getAllStorages(env: Env): Promise<any[]> {
-  const storages = await env.DB.prepare(
-    'SELECT * FROM storages WHERE disabled = 0 ORDER BY order_num ASC'
-  ).all();
-  return storages.results as any[];
+  try {
+    const storages = await env.DB.prepare(
+      'SELECT * FROM storages WHERE disabled = 0 ORDER BY order_num ASC'
+    ).all();
+    return Array.isArray(storages.results) ? storages.results : [];
+  } catch {
+    return [];
+  }
 }
 
 // Get the relative path within a storage
