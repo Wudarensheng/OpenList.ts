@@ -12,6 +12,8 @@ export async function initializeDatabase(env: Env): Promise<void> {
         disabled INTEGER DEFAULT 0,
         sso_id TEXT,
         otp_secret TEXT,
+        base_path TEXT DEFAULT '/',
+        permission INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
       )
@@ -59,6 +61,7 @@ export async function initializeDatabase(env: Env): Promise<void> {
       CREATE TABLE IF NOT EXISTS files (
         id TEXT PRIMARY KEY,
         path TEXT NOT NULL,
+        parent_path TEXT NOT NULL DEFAULT '',
         name TEXT NOT NULL,
         size INTEGER DEFAULT 0,
         modified TEXT,
@@ -80,13 +83,42 @@ export async function initializeDatabase(env: Env): Promise<void> {
       )
     `).run();
 
+    await env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS file_links (
+        storage_id INTEGER NOT NULL,
+        path TEXT NOT NULL,
+        url TEXT NOT NULL,
+        headers TEXT DEFAULT '{}',
+        expires_at TEXT NOT NULL,
+        PRIMARY KEY (storage_id, path)
+      )
+    `).run();
+
+    await env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS request_locks (
+        key TEXT PRIMARY KEY,
+        started_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      )
+    `).run();
+
+    // Migration: add parent_path column to existing files table if missing
+    try {
+      await env.DB.prepare(`ALTER TABLE files ADD COLUMN parent_path TEXT NOT NULL DEFAULT ''`).run();
+    } catch {
+      // Column already exists, ignore
+    }
+
     // Create indexes
     await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)`).run();
+    await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_files_parent_path_storage ON files(parent_path, storage_id)`).run();
     await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_files_storage_id ON files(storage_id)`).run();
     await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_files_is_folder ON files(is_folder)`).run();
     await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_file_cache_expires_at ON file_cache(expires_at)`).run();
     await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_storages_mount_path ON storages(mount_path)`).run();
     await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_storages_disabled ON storages(disabled)`).run();
+    await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_file_links_expires_at ON file_links(expires_at)`).run();
+    await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_request_locks_expires_at ON request_locks(expires_at)`).run();
 
     // Insert default admin user if not exists
     const adminUser = await env.DB.prepare(

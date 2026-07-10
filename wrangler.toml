@@ -10,4 +10,4 @@ ENVIRONMENT = "production"
 [[d1_databases]]
 binding = "DB"
 database_name = "openlist-db"
-database_id = "local-dev-id"
+database_id = "f7b96b7c-e5c9-43f7-a69d-64ca9f38fb62"

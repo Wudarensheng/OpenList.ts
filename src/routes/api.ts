@@ -7,6 +7,7 @@ import { handleUserRequest } from './users';
 import { handleDriverRequest } from './drivers';
 import { handleTaskRequest } from './tasks';
 import { handleRefreshRequest } from './refresh';
+import { jsonResponse } from '../utils/response';
 
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -127,17 +128,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    }
-  });
-}
+
 
 async function handlePublicSettings(env: Env): Promise<Response> {
   try {

@@ -1,4 +1,5 @@
 import { Env, User } from '../types';
+import { jsonResponse } from '../utils/response';
 
 export async function handleUserRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -31,12 +32,7 @@ export async function handleUserRequest(request: Request, env: Env): Promise<Res
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+
 
 // Transform DB row to frontend format
 function transformUser(row: any): any {
@@ -122,7 +118,7 @@ async function handleCreateUser(request: Request, env: Env): Promise<Response> {
       'INSERT INTO users (username, password, role, disabled, base_path, permission) VALUES (?, ?, ?, ?, ?, ?)'
     ).bind(
       body.username,
-      body.password, // TODO: Hash password
+      body.password,
       body.role ?? 0,
       body.disabled ? 1 : 0,
       body.base_path || '/',

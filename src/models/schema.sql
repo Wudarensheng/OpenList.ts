@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
   disabled INTEGER DEFAULT 0,
   sso_id TEXT,
   otp_secret TEXT,
+  base_path TEXT DEFAULT '/',
+  permission INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS storages (
 CREATE TABLE IF NOT EXISTS files (
   id TEXT PRIMARY KEY,
   path TEXT NOT NULL,
+  parent_path TEXT NOT NULL DEFAULT '',
   name TEXT NOT NULL,
   size INTEGER DEFAULT 0,
   modified TEXT,
@@ -72,10 +75,30 @@ CREATE TABLE IF NOT EXISTS file_cache (
   FOREIGN KEY (storage_id) REFERENCES storages(id) ON DELETE CASCADE
 );
 
+-- File download link cache
+CREATE TABLE IF NOT EXISTS file_links (
+  storage_id INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  url TEXT NOT NULL,
+  headers TEXT DEFAULT '{}',
+  expires_at TEXT NOT NULL,
+  PRIMARY KEY (storage_id, path)
+);
+
+-- Request locks for singleflight dedup
+CREATE TABLE IF NOT EXISTS request_locks (
+  key TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
+CREATE INDEX IF NOT EXISTS idx_files_parent_path_storage ON files(parent_path, storage_id);
 CREATE INDEX IF NOT EXISTS idx_files_storage_id ON files(storage_id);
 CREATE INDEX IF NOT EXISTS idx_files_is_folder ON files(is_folder);
 CREATE INDEX IF NOT EXISTS idx_file_cache_expires_at ON file_cache(expires_at);
 CREATE INDEX IF NOT EXISTS idx_storages_mount_path ON storages(mount_path);
 CREATE INDEX IF NOT EXISTS idx_storages_disabled ON storages(disabled);
+CREATE INDEX IF NOT EXISTS idx_file_links_expires_at ON file_links(expires_at);
+CREATE INDEX IF NOT EXISTS idx_request_locks_expires_at ON request_locks(expires_at);

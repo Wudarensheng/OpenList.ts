@@ -142,23 +142,90 @@ When creating a new S3 storage, provide the following JSON in the `addition` fie
 
 ```
 src/
-├── drivers/
-│   └── s3.ts          # S3 storage driver
+├── drivers/                    # Storage drivers (inspired by OpenList)
+│   ├── types.ts                # Core driver interfaces (Obj, Driver, etc.)
+│   ├── registry.ts             # Driver registration and management
+│   ├── base.ts                 # Common utility functions
+│   ├── template.ts             # Template for creating new drivers
+│   ├── s3/
+│   │   └── index.ts            # S3 Compatible Storage driver
+│   ├── onedrive/
+│   │   └── index.ts            # Microsoft OneDrive driver
+│   ├── aliyundrive_open/
+│   │   └── index.ts            # Alibaba Cloud Drive (Aliyun Pan) driver
+│   ├── pikpak/
+│   │   └── index.ts            # PikPak cloud storage driver
+│   └── dropbox/
+│       └── index.ts            # Dropbox driver
 ├── models/
-│   ├── init.ts        # Database initialization
-│   └── schema.sql     # Database schema
+│   ├── init.ts                 # Database initialization
+│   └── schema.sql              # Database schema
 ├── routes/
-│   ├── api.ts         # API router
-│   ├── auth.ts        # Authentication routes
-│   ├── fs.ts          # File system routes
-│   ├── settings.ts    # Settings routes
-│   ├── static.ts      # Static file serving
-│   ├── storage.ts     # Storage management routes
-│   └── users.ts       # User management routes
-├── router.ts          # Main router
-├── types.ts           # TypeScript types
-└── worker.ts          # Worker entry point
+│   ├── api.ts                  # API router
+│   ├── auth.ts                 # Authentication routes
+│   ├── drivers.ts              # Driver management routes
+│   ├── fs.ts                   # File system routes
+│   ├── settings.ts             # Settings routes
+│   ├── static.ts               # Static file serving
+│   ├── storage.ts              # Storage management routes
+│   └── users.ts                # User management routes
+├── router.ts                   # Main router
+├── types.ts                    # TypeScript types
+└── worker.ts                   # Worker entry point
 ```
+
+### Adding a New Storage Driver
+
+1. Create a new directory under `src/drivers/` (e.g., `src/drivers/mydriver/`)
+2. Create `index.ts` with the driver implementation:
+
+```typescript
+import { Driver, DriverConfig, DriverItem, Obj, ListResult, LinkResult } from '../types';
+import { registerDriver } from '../registry';
+import { createFileObj, createDirObj } from '../base';
+
+// Driver configuration
+const config: DriverConfig = {
+  name: 'MyDriver',
+  label: 'My Custom Driver',
+  local_sort: false,
+  only_proxy: false,
+  no_cache: false,
+  no_upload: false,
+  default_root: '/',
+};
+
+// Additional configuration fields
+const additional: DriverItem[] = [
+  { name: 'api_key', type: 'string', default: '', options: '', required: true, help: 'API Key' },
+];
+
+export class MyDriver implements Driver {
+  config(): DriverConfig { return config; }
+  
+  async init(cfg: Record<string, any>): Promise<void> {
+    // Initialize your driver
+  }
+  
+  async list(path: string, cfg: Record<string, any>): Promise<ListResult> {
+    // List files in directory
+    throw new Error('Not implemented');
+  }
+  
+  // ... implement other methods (get, link, mkdir, rename, copy, move, remove, put)
+}
+
+// Register the driver
+registerDriver(MyDriver, config, additional);
+```
+
+3. Import the driver in `src/drivers/registry.ts`:
+
+```typescript
+import './mydriver';
+```
+
+The driver will be automatically registered and available for use.
 
 ### Running Tests
 

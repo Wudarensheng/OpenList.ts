@@ -1,4 +1,5 @@
 import { Env } from '../types';
+import { jsonResponse } from '../utils/response';
 
 // Task state constants matching tache library
 const TaskState = {
@@ -93,9 +94,4 @@ export async function handleTaskRequest(request: Request, env: Env): Promise<Res
   return jsonResponse({ code: 200, message: 'success', data: [] });
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+

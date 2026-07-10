@@ -1,0 +1,280 @@
+/**
+ * S3 Compatible Storage Driver
+ * Uses aws4fetch for correct AWS Signature V4 signing in Cloudflare Workers
+ * Compatible with AWS S3, Cloudflare R2, Backblaze B2, MinIO, etc.
+ */
+
+import { AwsClient } from 'aws4fetch';
+
+import { Driver, DriverConfig, DriverItem, Obj, ListResult, LinkResult } from '../types';
+import { registerDriver } from '../registry';
+import { createFileObj, createDirObj } from '../base';
+
+export const s3Config: DriverConfig = {
+  name: 'S3',
+  label: 'S3 Compatible Storage',
+  local_sort: true,
+  only_proxy: false,
+  no_cache: false,
+  no_upload: false,
+  default_root: '/',
+};
+
+export const s3Additional: DriverItem[] = [
+  { name: 'bucket', type: 'string', default: '', options: '', required: true, help: 'Bucket name' },
+  { name: 'endpoint', type: 'string', default: '', options: '', required: true, help: 'Endpoint URL' },
+  { name: 'region', type: 'string', default: 'us-east-1', options: '', required: false, help: 'Region' },
+  { name: 'access_key_id', type: 'string', default: '', options: '', required: true, help: 'Access key ID' },
+  { name: 'access_key_secret', type: 'string', default: '', options: '', required: true, help: 'Secret access key' },
+  { name: 'root_path', type: 'string', default: '', options: '', required: false, help: 'Root path prefix' },
+  { name: 'custom_host', type: 'string', default: '', options: '', required: false, help: 'Custom host' },
+  { name: 'sign_url_expire', type: 'number', default: '3600', options: '', required: false, help: 'Sign URL expire (seconds)' },
+  { name: 'placeholder', type: 'string', default: 'placeholder', options: '', required: false, help: 'Placeholder file' },
+  { name: 'enable_custom_host_presign', type: 'bool', default: 'false', options: '', required: false, help: 'Enable custom host presign' },
+  { name: 'remove_bucket', type: 'bool', default: 'false', options: '', required: false, help: 'Remove bucket from path' },
+  { name: 'list_object_version', type: 'select', default: 'v2', options: 'v1,v2', required: false, help: 'List object version' },
+];
+
+export class S3Driver implements Driver {
+  private bucket: string = '';
+  private endpoint: string = '';
+  private region: string = 'us-east-1';
+  private accessKeyId: string = '';
+  private secretAccessKey: string = '';
+  private rootPath: string = '';
+  private customHost: string = '';
+  private signUrlExpire: number = 3600;
+  private baseUrl: string = '';
+  private client!: AwsClient;
+
+  config(): DriverConfig {
+    return s3Config;
+  }
+
+  async init(cfg: Record<string, any>): Promise<void> {
+    this.bucket = (cfg.bucket || '').trim();
+    this.rootPath = (cfg.root_path || '').trim();
+    this.customHost = (cfg.custom_host || '').trim();
+    this.signUrlExpire = cfg.sign_url_expire || 3600;
+    this.region = (cfg.region || 'us-east-1').trim();
+    this.accessKeyId = (cfg.access_key_id || '').trim();
+    this.secretAccessKey = (cfg.access_key_secret || '').trim();
+
+    let endpoint = (cfg.endpoint || '').trim();
+    if (endpoint && !endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+      endpoint = `https://${endpoint}`;
+    }
+    endpoint = endpoint.replace(/\/+$/, '');
+    this.endpoint = endpoint;
+    this.baseUrl = `${endpoint}/${this.bucket}`;
+
+    // Auto-detect region from endpoint for B2
+    if (this.region === 'auto' || !this.region) {
+      const hostMatch = endpoint.match(/s3[.\-]([a-z0-9-]+)\.backblazeb2\.com/i);
+      if (hostMatch) {
+        this.region = hostMatch[1];
+      } else {
+        this.region = 'us-east-1';
+      }
+    }
+
+    this.client = new AwsClient({
+      accessKeyId: this.accessKeyId,
+      secretAccessKey: this.secretAccessKey,
+      region: this.region,
+      service: 's3',
+    });
+  }
+
+  private getKey(path: string): string {
+    const cleanPath = path.replace(/^\//, '').replace(/\/$/, '');
+    return this.rootPath ? `${this.rootPath}/${cleanPath}`.replace(/\/+/g, '/') : cleanPath;
+  }
+
+  private async s3Fetch(url: string, init: RequestInit): Promise<Response> {
+    return this.client.fetch(url, init);
+  }
+
+  async list(path: string, cfg: Record<string, any>): Promise<ListResult> {
+    const prefix = this.getKey(path);
+    const normalizedPrefix = prefix ? (prefix.endsWith('/') ? prefix : prefix + '/') : '';
+
+    const content: Obj[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const params = new URLSearchParams({
+        'list-type': '2',
+        'delimiter': '/',
+      });
+      if (normalizedPrefix) params.set('prefix', normalizedPrefix);
+      if (continuationToken) params.set('continuation-token', continuationToken);
+
+      const url = `${this.baseUrl}/?${params.toString()}`;
+      const resp = await this.s3Fetch(url, { method: 'GET' });
+      const xml = await resp.text();
+
+      if (!resp.ok) {
+        throw new Error(`S3 list failed: ${resp.status} ${xml}`);
+      }
+
+      // Parse XML manually (no DOMParser needed)
+      const prefixes = xml.match(/<CommonPrefixes>[\s\S]*?<\/CommonPrefixes>/g) || [];
+      for (const p of prefixes) {
+        const nameMatch = p.match(/<Prefix>(.*?)<\/Prefix>/);
+        if (nameMatch) {
+          const name = nameMatch[1].replace(normalizedPrefix, '').replace(/\/$/, '');
+          if (name) {
+            content.push(createDirObj({ name, modified: new Date().toISOString() }));
+          }
+        }
+      }
+
+      const contents = xml.match(/<Contents>[\s\S]*?<\/Contents>/g) || [];
+      for (const c of contents) {
+        const keyMatch = c.match(/<Key>(.*?)<\/Key>/);
+        if (!keyMatch) continue;
+        const key = keyMatch[1];
+        if (key === normalizedPrefix) continue;
+        const name = key.replace(normalizedPrefix, '');
+        if (name && !name.includes('/')) {
+          const sizeMatch = c.match(/<Size>(.*?)<\/Size>/);
+          const modMatch = c.match(/<LastModified>(.*?)<\/LastModified>/);
+          content.push(createFileObj({
+            name,
+            size: sizeMatch ? parseInt(sizeMatch[1]) : 0,
+            modified: modMatch ? modMatch[1] : new Date().toISOString(),
+          }));
+        }
+      }
+
+      const isTruncated = xml.includes('<IsTruncated>true</IsTruncated>');
+      if (isTruncated) {
+        const tokenMatch = xml.match(/<NextContinuationToken>(.*?)<\/NextContinuationToken>/);
+        continuationToken = tokenMatch ? tokenMatch[1] : undefined;
+      } else {
+        continuationToken = undefined;
+      }
+    } while (continuationToken);
+
+    return { content, total: content.length };
+  }
+
+  async get(path: string, cfg: Record<string, any>): Promise<Obj> {
+    const key = this.getKey(path);
+    const url = `${this.baseUrl}/${key}`;
+
+    const resp = await this.s3Fetch(url, { method: 'HEAD' });
+
+    if (resp.ok) {
+      return createFileObj({
+        name: path.split('/').pop() || path,
+        size: parseInt(resp.headers.get('content-length') || '0'),
+        modified: resp.headers.get('last-modified') || new Date().toISOString(),
+      });
+    }
+
+    if (resp.status === 404) {
+      const listUrl = `${this.baseUrl}/?list-type=2&prefix=${encodeURIComponent(key + '/')}&max-keys=1`;
+      const listResp = await this.s3Fetch(listUrl, { method: 'GET' });
+      const xml = await listResp.text();
+      if (xml.includes('<KeyCount>0</KeyCount>')) {
+        throw new Error('Not found');
+      }
+      return createDirObj({ name: path.split('/').pop() || path, modified: new Date().toISOString() });
+    }
+
+    throw new Error(`S3 head failed: ${resp.status}`);
+  }
+
+  async link(path: string, cfg: Record<string, any>): Promise<LinkResult> {
+    const key = this.getKey(path);
+    const url = `${this.baseUrl}/${key}`;
+
+    // Generate presigned URL using aws4fetch
+    // aws4fetch uses X-Amz-Expires header for presigned URL expiration
+    const signed = await this.client.sign(new Request(url, {
+      headers: { 'X-Amz-Expires': String(this.signUrlExpire) },
+    }), {
+      aws: { signQuery: true },
+    });
+
+    let finalUrl = signed.url;
+    if (this.customHost) {
+      const urlObj = new URL(finalUrl);
+      finalUrl = `${this.customHost}${urlObj.pathname}${urlObj.search}`;
+    }
+
+    return { url: finalUrl };
+  }
+
+  async mkdir(path: string, cfg: Record<string, any>): Promise<void> {
+    const key = this.getKey(path) + '/';
+    const url = `${this.baseUrl}/${key}`;
+    const resp = await this.s3Fetch(url, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/x-directory' },
+      body: new Uint8Array(0),
+    });
+    if (!resp.ok) {
+      throw new Error(`S3 mkdir failed: ${resp.status} ${await resp.text()}`);
+    }
+  }
+
+  async rename(path: string, newName: string, cfg: Record<string, any>): Promise<void> {
+    const oldKey = this.getKey(path);
+    const parentPath = path.substring(0, path.lastIndexOf('/'));
+    const newKey = this.getKey(`${parentPath}/${newName}`);
+    await this.copyFile(oldKey, newKey);
+    await this.deleteFile(oldKey);
+  }
+
+  async copy(src: string, dst: string, cfg: Record<string, any>): Promise<void> {
+    await this.copyFile(this.getKey(src), this.getKey(dst));
+  }
+
+  async move(src: string, dst: string, cfg: Record<string, any>): Promise<void> {
+    const srcKey = this.getKey(src);
+    const dstKey = this.getKey(dst);
+    await this.copyFile(srcKey, dstKey);
+    await this.deleteFile(srcKey);
+  }
+
+  async remove(path: string, cfg: Record<string, any>): Promise<void> {
+    await this.deleteFile(this.getKey(path));
+  }
+
+  async put(path: string, file: ArrayBuffer, contentType: string, cfg: Record<string, any>): Promise<void> {
+    const key = this.getKey(path);
+    const url = `${this.baseUrl}/${key}`;
+    const resp = await this.s3Fetch(url, {
+      method: 'PUT',
+      headers: { 'content-type': contentType },
+      body: new Uint8Array(file),
+    });
+    if (!resp.ok) {
+      throw new Error(`S3 put failed: ${resp.status} ${await resp.text()}`);
+    }
+  }
+
+  private async copyFile(srcKey: string, dstKey: string): Promise<void> {
+    const url = `${this.baseUrl}/${dstKey}`;
+    const resp = await this.s3Fetch(url, {
+      method: 'PUT',
+      headers: { 'x-amz-copy-source': `${this.bucket}/${srcKey}` },
+    });
+    if (!resp.ok) {
+      throw new Error(`S3 copy failed: ${resp.status} ${await resp.text()}`);
+    }
+  }
+
+  private async deleteFile(key: string): Promise<void> {
+    const url = `${this.baseUrl}/${key}`;
+    const resp = await this.s3Fetch(url, { method: 'DELETE' });
+    if (!resp.ok && resp.status !== 404) {
+      throw new Error(`S3 delete failed: ${resp.status} ${await resp.text()}`);
+    }
+  }
+}
+
+registerDriver(S3Driver, s3Config, s3Additional);

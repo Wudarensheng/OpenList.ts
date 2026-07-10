@@ -1,4 +1,5 @@
 import { Env } from '../types';
+import { jsonResponse } from '../utils/response';
 
 export async function handleAuthRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -12,6 +13,22 @@ export async function handleAuthRequest(request: Request, env: Env): Promise<Res
     return handleLoginHash(request, env);
   }
 
+  // SHA-256 test endpoint
+  if (path === '/api/auth/sha256test' && request.method === 'GET') {
+    const testInput = url.searchParams.get('input') || 'admin';
+    const hash = await sha256(testInput);
+    return jsonResponse({ 
+      code: 200, 
+      data: { 
+        input: testInput, 
+        hash, 
+        hashLen: hash.length,
+        expected: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918',
+        match: hash === '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918'
+      } 
+    });
+  }
+
   if (path === '/api/auth/logout' && request.method === 'GET') {
     return handleLogout();
   }
@@ -23,12 +40,7 @@ export async function handleAuthRequest(request: Request, env: Env): Promise<Res
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
   try {
@@ -43,77 +55,38 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
       'SELECT * FROM users WHERE username = ? AND disabled = 0'
     ).bind(username).first();
 
-    if (!user) {
-      return jsonResponse({ code: 401, message: 'Invalid username or password' }, 401);
-    }
-
-    if ((user as any).password !== password) {
+    if (!user || (user as any).password !== password) {
       return jsonResponse({ code: 401, message: 'Invalid username or password' }, 401);
     }
 
     const token = generateToken((user as any).id);
-
     return jsonResponse({
       code: 200,
       message: 'success',
       data: {
         token,
-        user: {
-          id: (user as any).id,
-          username: (user as any).username,
-          role: (user as any).role
-        }
+        user: { id: (user as any).id, username: (user as any).username, role: (user as any).role }
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Login error:', error);
-    return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
+    return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
   }
 }
+
+// AList frontend hashes passwords as sha256(password + "-" + salt)
+const ALIST_HASH_SALT = 'https://github.com/alist-org/alist';
 
 async function handleLoginHash(request: Request, env: Env): Promise<Response> {
   try {
     const body = await request.json() as any;
-    console.log('Login hash request body:', JSON.stringify(body));
-    
     const username = body.username;
-    // Try all possible password field names
-    const password = body.hash || body.password || body.psw || body.passwd || body.pwd;
-    
-    console.log('Extracted username:', username, 'password:', password ? '***' : 'undefined');
-    
-    if (!username) {
-      return jsonResponse({ code: 400, message: 'Username is required' }, 400);
+    const hash = body.hash || body.password || body.psw || body.passwd || body.pwd;
+
+    if (!username || !hash) {
+      return jsonResponse({ code: 400, message: 'Username and password are required' }, 400);
     }
 
-    // For admin user with password 'admin', accept any login attempt for demo
-    if (username === 'admin') {
-      const user = await env.DB.prepare(
-        'SELECT * FROM users WHERE username = ? AND disabled = 0'
-      ).bind(username).first();
-
-      if (user) {
-        const storedPassword = (user as any).password;
-        // Accept if password matches or if stored password is 'admin'
-        if (password === storedPassword || storedPassword === 'admin' || password === 'admin') {
-          const token = generateToken((user as any).id);
-          return jsonResponse({
-            code: 200,
-            message: 'success',
-            data: {
-              token,
-              user: {
-                id: (user as any).id,
-                username: (user as any).username,
-                role: (user as any).role
-              }
-            }
-          });
-        }
-      }
-    }
-
-    // For other users, do strict validation
     const user = await env.DB.prepare(
       'SELECT * FROM users WHERE username = ? AND disabled = 0'
     ).bind(username).first();
@@ -123,27 +96,54 @@ async function handleLoginHash(request: Request, env: Env): Promise<Response> {
     }
 
     const storedPassword = (user as any).password;
-    if (password !== storedPassword) {
-      return jsonResponse({ code: 401, message: 'Invalid username or password' }, 401);
+
+    // AList frontend sends sha256(plaintextPassword + "-" + ALIST_HASH_SALT)
+    // We compare the received hash against sha256(storedPassword + "-" + salt)
+    // which works when storedPassword is plaintext.
+    const alistHash = await sha256(`${storedPassword}-${ALIST_HASH_SALT}`);
+    if (hash === alistHash) {
+      const token = generateToken((user as any).id);
+      return jsonResponse({
+        code: 200,
+        message: 'success',
+        data: {
+          token,
+          user: { id: (user as any).id, username: (user as any).username, role: (user as any).role }
+        }
+      });
     }
 
-    const token = generateToken((user as any).id);
-
-    return jsonResponse({
-      code: 200,
-      message: 'success',
-      data: {
-        token,
-        user: {
-          id: (user as any).id,
-          username: (user as any).username,
-          role: (user as any).role
+    // Fallback: direct comparison (stored password might already be a hash)
+    if (hash === storedPassword) {
+      const token = generateToken((user as any).id);
+      return jsonResponse({
+        code: 200,
+        message: 'success',
+        data: {
+          token,
+          user: { id: (user as any).id, username: (user as any).username, role: (user as any).role }
         }
-      }
-    });
-  } catch (error) {
+      });
+    }
+
+    // Fallback: plain SHA-256 of stored password
+    const storedHash = await sha256(storedPassword);
+    if (hash === storedHash) {
+      const token = generateToken((user as any).id);
+      return jsonResponse({
+        code: 200,
+        message: 'success',
+        data: {
+          token,
+          user: { id: (user as any).id, username: (user as any).username, role: (user as any).role }
+        }
+      });
+    }
+
+    return jsonResponse({ code: 401, message: 'Invalid username or password' }, 401);
+  } catch (error: any) {
     console.error('Login hash error:', error);
-    return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
+    return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
   }
 }
 
@@ -153,7 +153,6 @@ function handleLogout(): Response {
 
 async function handleGetCurrentUser(request: Request, env: Env): Promise<Response> {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-  
   if (!token) {
     return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
   }
@@ -175,27 +174,42 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
     return jsonResponse({
       code: 200,
       message: 'success',
-      data: user
+      data: {
+        id: (user as any).id,
+        username: (user as any).username,
+        role: (user as any).role,
+        disabled: (user as any).disabled === 1,
+        permission: (user as any).role === 2 ? 0xFFFFFFFF : (user as any).role === 1 ? 0x00000007 : 0x00000001,
+        sso_id: '',
+        otp: false,
+        password: '',
+        base_path: '/',
+        home_dir: '/'
+      }
     });
   } catch (error) {
     return jsonResponse({ code: 401, message: 'Invalid token' }, 401);
   }
 }
 
+async function sha256(input: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 function generateToken(userId: number): string {
-  const payload = {
-    userId,
-    exp: Date.now() + 24 * 60 * 60 * 1000 // 24 hours
-  };
+  const payload = { userId, exp: Date.now() + 24 * 60 * 60 * 1000 };
   return btoa(JSON.stringify(payload));
 }
 
 function verifyToken(token: string): number | null {
   try {
     const payload = JSON.parse(atob(token));
-    if (payload.exp < Date.now()) {
-      return null;
-    }
+    if (payload.exp < Date.now()) return null;
     return payload.userId;
   } catch {
     return null;

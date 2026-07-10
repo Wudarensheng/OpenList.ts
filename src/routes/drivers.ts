@@ -1,5 +1,6 @@
 import { Env } from '../types';
 import { getDriverNames, getDriverInfoMap, getDriverInfo } from '../drivers/registry';
+import { jsonResponse } from '../utils/response';
 
 export async function handleDriverRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -10,7 +11,7 @@ export async function handleDriverRequest(request: Request, env: Env): Promise<R
     return jsonResponse({
       code: 200,
       message: 'success',
-      data: getDriverNames()
+      data: await getDriverNames()
     });
   }
 
@@ -19,7 +20,7 @@ export async function handleDriverRequest(request: Request, env: Env): Promise<R
     return jsonResponse({
       code: 200,
       message: 'success',
-      data: getDriverInfoMap()
+      data: await getDriverInfoMap()
     });
   }
 
@@ -30,7 +31,7 @@ export async function handleDriverRequest(request: Request, env: Env): Promise<R
       return jsonResponse({ code: 400, message: 'Driver name is required' }, 400);
     }
 
-    const info = getDriverInfo(driverName);
+    const info = await getDriverInfo(driverName);
     if (!info) {
       return jsonResponse({ code: 404, message: `driver [${driverName}] not found` }, 404);
     }
@@ -45,9 +46,4 @@ export async function handleDriverRequest(request: Request, env: Env): Promise<R
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+

@@ -1,5 +1,19 @@
 import { Env } from '../types';
 import { getDriverInstance } from '../drivers/registry';
+import { jsonResponse } from '../utils/response';
+import {
+  isCacheValid,
+  getCachedFiles as getCachedFilesFromDB,
+  getCachedFile as getCachedFileFromDB,
+  cacheFiles as cacheFilesToDB,
+  getCachedLink,
+  cacheLink,
+  invalidateCache as invalidateCacheInDB,
+  invalidateLinkCache,
+  invalidateSubtree,
+  acquireLock,
+  releaseLock,
+} from '../cache';
 
 export async function handleFsRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -9,7 +23,7 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
   let userId = 0;
   let userRole = 0;
-  
+
   if (token) {
     try {
       const payload = JSON.parse(atob(token));
@@ -34,7 +48,7 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
 
   // POST /api/fs/get
   if (path === '/api/fs/get') {
-    return handleGetFile(request, env);
+    return handleGetFile(request, env, userId, userRole);
   }
 
   // POST /api/fs/dirs
@@ -97,12 +111,7 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+
 
 // Get storage that matches the given path
 async function getStorageForPath(path: string, env: Env): Promise<any> {
@@ -145,7 +154,7 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
     const body = await request.json() as any;
     const path = body.path || '/';
     const page = body.page || 1;
-    const perPage = body.per_page || 100;
+    const perPage = body.per_page || 0; // 0 = no pagination
     const refresh = body.refresh || false;
 
     // Get storage for this path
@@ -195,74 +204,145 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
       });
     }
 
-    // Try cache first (from D1)
+    const cacheExpiration = storage.cache_expiration || 30;
+
+    // Try cache first (from D1) - check expiration
     if (!refresh) {
-      const cachedFiles = await getCachedFiles(path, storage.id, env);
+      const cacheValid = await isCacheValid(storage.id, path, env);
+      if (cacheValid) {
+        const cachedFiles = await getCachedFilesFromDB(storage.id, path, env);
+        if (cachedFiles && cachedFiles.length > 0) {
+          let content = cachedFiles.map((f: any) => ({
+            name: f.name,
+            size: f.size,
+            is_dir: f.is_folder === 1,
+            modified: f.modified,
+            created: f.ctime || f.modified,
+            sign: '',
+            thumb: '',
+            type: f.is_folder ? 0 : getFileType(f.name),
+            hashinfo: f.hash_info || '',
+            hash_info: {}
+          }));
+
+          // Apply pagination
+          const total = content.length;
+          if (perPage > 0) {
+            const start = (page - 1) * perPage;
+            content = content.slice(start, start + perPage);
+          }
+
+          return jsonResponse({
+            code: 200,
+            message: 'success',
+            data: {
+              content,
+              total,
+              readme: '',
+              header: '',
+              write: userRole >= 1,
+              provider: storage.driver
+            }
+          });
+        }
+      }
+    }
+
+    // Singleflight: try to acquire lock for this path
+    const lockKey = `list:${storage.id}:${path}`;
+    const lockAcquired = await acquireLock(lockKey, 30, env);
+
+    if (!lockAcquired) {
+      // Another request is already fetching this path, wait and retry from cache
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const cachedFiles = await getCachedFilesFromDB(storage.id, path, env);
       if (cachedFiles && cachedFiles.length > 0) {
+        let content = cachedFiles.map((f: any) => ({
+          name: f.name,
+          size: f.size,
+          is_dir: f.is_folder === 1,
+          modified: f.modified,
+          created: f.ctime || f.modified,
+          sign: '',
+          thumb: '',
+          type: f.is_folder ? 0 : getFileType(f.name),
+          hashinfo: f.hash_info || '',
+          hash_info: {}
+        }));
+
+        const total = content.length;
+        if (perPage > 0) {
+          const start = (page - 1) * perPage;
+          content = content.slice(start, start + perPage);
+        }
+
         return jsonResponse({
           code: 200,
           message: 'success',
           data: {
-            content: cachedFiles.map((f: any) => ({
-              name: f.name,
-              size: f.size,
-              is_dir: f.is_folder === 1,
-              modified: f.modified,
-              created: f.ctime || f.modified,
-              sign: '',
-              thumb: '',
-              type: f.is_folder ? 0 : getFileType(f.name),
-              hashinfo: f.hash_info || '',
-              hash_info: {}
-            })),
-            total: cachedFiles.length,
+            content,
+            total,
             readme: '',
             header: '',
-            write: true,
+            write: userRole >= 1,
             provider: storage.driver
           }
         });
       }
     }
 
-    // Fetch from driver
-    const driver = await getDriver(storage);
-    const relativePath = getRelativePath(path, storage.mount_path);
-    const result = await driver.list(relativePath, JSON.parse(storage.addition));
+    try {
+      // Fetch from driver
+      const driver = await getDriver(storage);
+      const relativePath = getRelativePath(path, storage.mount_path);
+      const result = await driver.list(relativePath, JSON.parse(storage.addition));
 
-    // Cache the results in D1
-    await cacheFiles(path, storage.id, result.content, env);
+      // Cache the results in D1
+      await cacheFilesToDB(storage.id, path, result.content, cacheExpiration, env);
 
-    return jsonResponse({
-      code: 200,
-      message: 'success',
-      data: {
-        content: result.content.map((f: any) => ({
-          name: f.name,
-          size: f.size,
-          is_dir: f.is_dir,
-          modified: f.modified,
-          created: f.created || f.modified,
-          sign: '',
-          thumb: f.thumb || '',
-          type: f.is_dir ? 0 : getFileType(f.name),
-          hashinfo: f.hash_info || '',
-          hash_info: {}
-        })),
-        total: result.total,
-        readme: '',
-        header: '',
-        write: true,
-        provider: storage.driver
+      let content = result.content.map((f: any) => ({
+        name: f.name,
+        size: f.size,
+        is_dir: f.is_dir,
+        modified: f.modified,
+        created: f.created || f.modified,
+        sign: '',
+        thumb: f.thumb || '',
+        type: f.is_dir ? 0 : getFileType(f.name),
+        hashinfo: f.hash_info || '',
+        hash_info: {}
+      }));
+
+      // Apply pagination
+      const total = content.length;
+      if (perPage > 0) {
+        const start = (page - 1) * perPage;
+        content = content.slice(start, start + perPage);
       }
-    });
+
+      return jsonResponse({
+        code: 200,
+        message: 'success',
+        data: {
+          content,
+          total,
+          readme: '',
+          header: '',
+          write: userRole >= 1,
+          provider: storage.driver
+        }
+      });
+    } finally {
+      // Release lock
+      await releaseLock(lockKey, env);
+    }
   } catch (error: any) {
     console.error('List files error:', error);
     return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
   }
 }
 
-async function handleGetFile(request: Request, env: Env): Promise<Response> {
+async function handleGetFile(request: Request, env: Env, userId: number, userRole: number): Promise<Response> {
   try {
     const body = await request.json() as any;
     const path = body.path;
@@ -276,9 +356,41 @@ async function handleGetFile(request: Request, env: Env): Promise<Response> {
       return jsonResponse({ code: 404, message: 'Storage not found' }, 404);
     }
 
+    const cacheExpiration = storage.cache_expiration || 30;
+
     // Try cache first
-    const cachedFile = await getCachedFile(path, storage.id, env);
+    const cachedFile = await getCachedFileFromDB(storage.id, path, env);
     if (cachedFile) {
+      // Try cached link first
+      let linkUrl = '';
+      const cachedLinkResult = await getCachedLink(storage.id, path, env);
+      if (cachedLinkResult) {
+        linkUrl = cachedLinkResult.url;
+      } else {
+        // Fetch link from driver with singleflight
+        const linkLockKey = `link:${storage.id}:${path}`;
+        const linkLockAcquired = await acquireLock(linkLockKey, 30, env);
+
+        if (!linkLockAcquired) {
+          // Wait for other request to populate link cache
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const retryLink = await getCachedLink(storage.id, path, env);
+          if (retryLink) linkUrl = retryLink.url;
+        } else {
+          try {
+            const driver = await getDriver(storage);
+            const relativePath = getRelativePath(path, storage.mount_path);
+            const link = await driver.link(relativePath, JSON.parse(storage.addition));
+            linkUrl = link.url;
+            await cacheLink(storage.id, path, link, cacheExpiration * 60, env);
+          } catch (e) {
+            // Ignore link errors for directories or unsupported drivers
+          } finally {
+            await releaseLock(linkLockKey, env);
+          }
+        }
+      }
+
       return jsonResponse({
         code: 200,
         message: 'success',
@@ -293,7 +405,7 @@ async function handleGetFile(request: Request, env: Env): Promise<Response> {
           type: cachedFile.is_folder ? 0 : getFileType(cachedFile.name),
           hashinfo: cachedFile.hash_info || '',
           hash_info: {},
-          raw_url: '',
+          raw_url: linkUrl,
           readme: '',
           header: '',
           provider: storage.driver,
@@ -302,40 +414,82 @@ async function handleGetFile(request: Request, env: Env): Promise<Response> {
       });
     }
 
-    // Fetch from driver
-    const driver = await getDriver(storage);
-    const relativePath = getRelativePath(path, storage.mount_path);
-    const file = await driver.get(relativePath, JSON.parse(storage.addition));
-    
-    let linkUrl = '';
-    try {
-      const link = await driver.link(relativePath, JSON.parse(storage.addition));
-      linkUrl = link.url;
-    } catch (e) {
-      // Ignore link errors
+    // Singleflight: try to acquire lock for fetching file info
+    const lockKey = `get:${storage.id}:${path}`;
+    const lockAcquired = await acquireLock(lockKey, 30, env);
+
+    if (!lockAcquired) {
+      // Wait for other request to populate cache
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const retryFile = await getCachedFileFromDB(storage.id, path, env);
+      if (retryFile) {
+        let linkUrl = '';
+        const cachedLinkResult = await getCachedLink(storage.id, path, env);
+        if (cachedLinkResult) linkUrl = cachedLinkResult.url;
+
+        return jsonResponse({
+          code: 200,
+          message: 'success',
+          data: {
+            name: retryFile.name,
+            size: retryFile.size,
+            is_dir: retryFile.is_folder === 1,
+            modified: retryFile.modified,
+            created: retryFile.ctime || retryFile.modified,
+            sign: '',
+            thumb: '',
+            type: retryFile.is_folder ? 0 : getFileType(retryFile.name),
+            hashinfo: retryFile.hash_info || '',
+            hash_info: {},
+            raw_url: linkUrl,
+            readme: '',
+            header: '',
+            provider: storage.driver,
+            related: []
+          }
+        });
+      }
     }
 
-    return jsonResponse({
-      code: 200,
-      message: 'success',
-      data: {
-        name: file.name,
-        size: file.size,
-        is_dir: file.is_dir,
-        modified: file.modified,
-        created: file.created || file.modified,
-        sign: '',
-        thumb: file.thumb || '',
-        type: file.is_dir ? 0 : getFileType(file.name),
-        hashinfo: file.hash_info || '',
-        hash_info: {},
-        raw_url: linkUrl,
-        readme: '',
-        header: '',
-        provider: storage.driver,
-        related: []
+    try {
+      // Fetch from driver
+      const driver = await getDriver(storage);
+      const relativePath = getRelativePath(path, storage.mount_path);
+      const file = await driver.get(relativePath, JSON.parse(storage.addition));
+
+      let linkUrl = '';
+      try {
+        const link = await driver.link(relativePath, JSON.parse(storage.addition));
+        linkUrl = link.url;
+        await cacheLink(storage.id, path, link, cacheExpiration * 60, env);
+      } catch (e) {
+        // Ignore link errors
       }
-    });
+
+      return jsonResponse({
+        code: 200,
+        message: 'success',
+        data: {
+          name: file.name,
+          size: file.size,
+          is_dir: file.is_dir,
+          modified: file.modified,
+          created: file.created || file.modified,
+          sign: '',
+          thumb: file.thumb || '',
+          type: file.is_dir ? 0 : getFileType(file.name),
+          hashinfo: file.hash_info || '',
+          hash_info: {},
+          raw_url: linkUrl,
+          readme: '',
+          header: '',
+          provider: storage.driver,
+          related: []
+        }
+      });
+    } finally {
+      await releaseLock(lockKey, env);
+    }
   } catch (error: any) {
     console.error('Get file error:', error);
     return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
@@ -353,22 +507,29 @@ async function handleListDirs(request: Request, env: Env): Promise<Response> {
     }
 
     // Try cache first
-    const cachedDirs = await getCachedDirs(path, storage.id, env);
-    if (cachedDirs && cachedDirs.length > 0) {
-      return jsonResponse({
-        code: 200,
-        message: 'success',
-        data: cachedDirs.map((f: any) => ({
+    const cacheValid = await isCacheValid(storage.id, path, env);
+    if (cacheValid) {
+      const cachedFiles = await getCachedFilesFromDB(storage.id, path, env);
+      const dirs = cachedFiles
+        .filter((f: any) => f.is_folder === 1)
+        .map((f: any) => ({
           name: f.name,
           modified: f.modified
-        }))
-      });
+        }));
+
+      if (dirs.length > 0) {
+        return jsonResponse({ code: 200, message: 'success', data: dirs });
+      }
     }
 
     // Fetch from driver
     const driver = await getDriver(storage);
     const relativePath = getRelativePath(path, storage.mount_path);
     const result = await driver.list(relativePath, JSON.parse(storage.addition));
+
+    // Cache results
+    const cacheExpiration = storage.cache_expiration || 30;
+    await cacheFilesToDB(storage.id, path, result.content, cacheExpiration, env);
 
     const dirs = result.content
       .filter((f: any) => f.is_dir)
@@ -404,8 +565,8 @@ async function handleMkdir(request: Request, env: Env): Promise<Response> {
     const relativePath = getRelativePath(fullPath, storage.mount_path);
     await driver.mkdir(relativePath, JSON.parse(storage.addition));
 
-    // Invalidate cache
-    await invalidateCache(path, storage.id, env);
+    // Invalidate parent directory cache
+    await invalidateCacheInDB(storage.id, path, env);
 
     return jsonResponse({ code: 200, message: 'success' });
   } catch (error: any) {
@@ -433,9 +594,8 @@ async function handleRename(request: Request, env: Env): Promise<Response> {
     const relativePath = getRelativePath(path, storage.mount_path);
     await driver.rename(relativePath, name, JSON.parse(storage.addition));
 
-    // Invalidate cache
-    const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
-    await invalidateCache(parentPath, storage.id, env);
+    // Invalidate the item and its parent
+    await invalidateCacheInDB(storage.id, path, env);
 
     return jsonResponse({ code: 200, message: 'success' });
   } catch (error: any) {
@@ -466,10 +626,10 @@ async function handleRemove(request: Request, env: Env): Promise<Response> {
       const fullPath = dir === '/' ? `/${name}` : `${dir}/${name}`;
       const relativePath = getRelativePath(fullPath, storage.mount_path);
       await driver.remove(relativePath, addition);
-    }
 
-    // Invalidate cache
-    await invalidateCache(dir, storage.id, env);
+      // Invalidate subtree for each removed item (handles both files and directories)
+      await invalidateSubtree(storage.id, fullPath, env);
+    }
 
     return jsonResponse({ code: 200, message: 'success' });
   } catch (error: any) {
@@ -501,11 +661,11 @@ async function handleMove(request: Request, env: Env): Promise<Response> {
       const srcPath = srcDir === '/' ? `/${name}` : `${srcDir}/${name}`;
       const dstPath = dstDir === '/' ? `/${name}` : `${dstDir}/${name}`;
       await driver.move(getRelativePath(srcPath, storage.mount_path), getRelativePath(dstPath, storage.mount_path), addition);
-    }
 
-    // Invalidate cache
-    await invalidateCache(srcDir, storage.id, env);
-    await invalidateCache(dstDir, storage.id, env);
+      // Invalidate source subtree and destination parent
+      await invalidateSubtree(storage.id, srcPath, env);
+      await invalidateCacheInDB(storage.id, dstDir, env);
+    }
 
     return jsonResponse({ code: 200, message: 'success' });
   } catch (error: any) {
@@ -539,8 +699,8 @@ async function handleCopy(request: Request, env: Env): Promise<Response> {
       await driver.copy(getRelativePath(srcPath, storage.mount_path), getRelativePath(dstPath, storage.mount_path), addition);
     }
 
-    // Invalidate cache
-    await invalidateCache(dstDir, storage.id, env);
+    // Invalidate destination cache
+    await invalidateCacheInDB(storage.id, dstDir, env);
 
     return jsonResponse({ code: 200, message: 'success' });
   } catch (error: any) {
@@ -568,8 +728,9 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
 
     await driver.put(relativePath, fileBuffer, contentType, JSON.parse(storage.addition));
 
-    // Invalidate cache
-    await invalidateCache(path, storage.id, env);
+    // Invalidate parent directory cache and specific file link cache
+    await invalidateCacheInDB(storage.id, path, env);
+    await invalidateLinkCache(storage.id, fullPath, env);
 
     return jsonResponse({ code: 200, message: 'success' });
   } catch (error: any) {
@@ -581,7 +742,7 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
 async function handleFormUpload(request: Request, env: Env): Promise<Response> {
   try {
     const formData = await request.formData();
-    const file = formData.get('file') as File;
+    const file = formData.get('file') as unknown as File;
     const path = formData.get('path') as string || '/';
 
     if (!file) {
@@ -600,109 +761,14 @@ async function handleFormUpload(request: Request, env: Env): Promise<Response> {
 
     await driver.put(relativePath, fileBuffer, file.type || 'application/octet-stream', JSON.parse(storage.addition));
 
-    // Invalidate cache
-    await invalidateCache(path, storage.id, env);
+    // Invalidate parent directory cache and specific file link cache
+    await invalidateCacheInDB(storage.id, path, env);
+    await invalidateLinkCache(storage.id, fullPath, env);
 
     return jsonResponse({ code: 200, message: 'success' });
   } catch (error: any) {
     console.error('Form upload error:', error);
     return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
-  }
-}
-
-// Cache helper functions
-async function getCachedFiles(path: string, storageId: number, env: Env): Promise<any[]> {
-  try {
-    // Get files that are direct children of this path
-    const files = await env.DB.prepare(
-      `SELECT * FROM files 
-       WHERE storage_id = ? 
-       AND (
-         (path = ? AND is_folder = 1) OR 
-         (path LIKE ? AND path NOT LIKE ? AND is_folder = 0)
-       )
-       ORDER BY is_folder DESC, name ASC`
-    ).bind(storageId, path, `${path}/%`, `${path}/%/%`).all();
-
-    return files.results;
-  } catch {
-    return [];
-  }
-}
-
-async function getCachedFile(path: string, storageId: number, env: Env): Promise<any> {
-  try {
-    const file = await env.DB.prepare(
-      'SELECT * FROM files WHERE path = ? AND storage_id = ?'
-    ).bind(path, storageId).first();
-
-    return file;
-  } catch {
-    return null;
-  }
-}
-
-async function getCachedDirs(path: string, storageId: number, env: Env): Promise<any[]> {
-  try {
-    const dirs = await env.DB.prepare(
-      `SELECT * FROM files 
-       WHERE path LIKE ? AND storage_id = ? AND is_folder = 1 
-       AND path NOT LIKE ?
-       ORDER BY name ASC`
-    ).bind(`${path}%`, storageId, `${path}%/%`).all();
-
-    return dirs.results;
-  } catch {
-    return [];
-  }
-}
-
-async function cacheFiles(path: string, storageId: number, files: any[], env: Env): Promise<void> {
-  try {
-    // Clear old cache for this path
-    await env.DB.prepare(
-      'DELETE FROM files WHERE path LIKE ? AND storage_id = ?'
-    ).bind(`${path}%`, storageId).run();
-
-    // Insert new files
-    for (const file of files) {
-      const filePath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO files (id, path, name, size, modified, ctime, is_folder, hash_info, storage_id) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        `${storageId}_${filePath}`,
-        filePath,
-        file.name,
-        file.size || 0,
-        file.modified || new Date().toISOString(),
-        file.created || file.modified || new Date().toISOString(),
-        file.is_dir ? 1 : 0,
-        file.hash_info || '',
-        storageId
-      ).run();
-    }
-
-    // Update cache timestamp
-    await env.DB.prepare(
-      'INSERT OR REPLACE INTO file_cache (path, storage_id, expires_at) VALUES (?, ?, datetime("now", "+1 hour"))'
-    ).bind(path, storageId).run();
-  } catch (error) {
-    console.error('Cache files error:', error);
-  }
-}
-
-async function invalidateCache(path: string, storageId: number, env: Env): Promise<void> {
-  try {
-    await env.DB.prepare(
-      'DELETE FROM file_cache WHERE path = ? AND storage_id = ?'
-    ).bind(path, storageId).run();
-
-    await env.DB.prepare(
-      'DELETE FROM files WHERE path LIKE ? AND storage_id = ?'
-    ).bind(`${path}%`, storageId).run();
-  } catch (error) {
-    console.error('Invalidate cache error:', error);
   }
 }
 
@@ -712,7 +778,7 @@ function getFileType(name: string): number {
   const videoExts = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'webm'];
   const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'wma'];
   const docExts = ['doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md'];
-  
+
   if (imageExts.includes(ext)) return 1;
   if (videoExts.includes(ext)) return 2;
   if (audioExts.includes(ext)) return 3;

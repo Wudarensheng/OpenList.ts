@@ -1,4 +1,5 @@
 import { Env, SettingItem } from '../types';
+import { jsonResponse } from '../utils/response';
 
 export async function handleSettingRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -31,12 +32,7 @@ export async function handleSettingRequest(request: Request, env: Env): Promise<
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+
 
 // Transform DB row to frontend format
 function transformSetting(row: any): any {
