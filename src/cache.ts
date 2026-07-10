@@ -26,7 +26,7 @@ export async function getCachedFiles(storageId: number, parentPath: string, env:
        ORDER BY is_folder DESC, name ASC`
     ).bind(storageId, parentPath).all();
 
-    return result.results;
+    return Array.isArray(result.results) ? result.results : [];
   } catch {
     return [];
   }
