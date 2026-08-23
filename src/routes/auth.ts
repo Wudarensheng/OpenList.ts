@@ -1,5 +1,6 @@
 import { Env } from '../types';
 import { jsonResponse } from '../utils/response';
+import { getGuestUser } from '../utils/guest';
 
 export async function handleAuthRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -153,14 +154,18 @@ function handleLogout(): Response {
 
 async function handleGetCurrentUser(request: Request, env: Env): Promise<Response> {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+
+  // No/invalid token -> guest user (view + download only, no permissions)
+  const guestResponse = () => jsonResponse({ code: 200, message: 'success', data: getGuestUser() });
+
   if (!token) {
-    return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+    return guestResponse();
   }
 
   try {
     const userId = verifyToken(token);
     if (!userId) {
-      return jsonResponse({ code: 401, message: 'Invalid token' }, 401);
+      return guestResponse();
     }
 
     const user = await env.DB.prepare(
@@ -168,7 +173,7 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
     ).bind(userId).first();
 
     if (!user) {
-      return jsonResponse({ code: 401, message: 'User not found' }, 401);
+      return guestResponse();
     }
 
     return jsonResponse({
@@ -188,7 +193,7 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
       }
     });
   } catch (error) {
-    return jsonResponse({ code: 401, message: 'Invalid token' }, 401);
+    return guestResponse();
   }
 }
 

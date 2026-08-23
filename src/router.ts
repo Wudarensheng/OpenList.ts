@@ -1,6 +1,7 @@
 import { Env } from './types';
 import { handleApiRequest } from './routes/api';
 import { handleStaticFile } from './routes/static';
+import { handleDownloadRequest } from './routes/download';
 
 export async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
@@ -25,6 +26,11 @@ export async function handleRequest(request: Request, env: Env, ctx: ExecutionCo
   // Handle manifest.json
   if (path === '/manifest.json') {
     return handleManifest();
+  }
+
+  // Handle direct link / proxy download routes (/d/<path>, /p/<path>)
+  if (path.startsWith('/d/') || path.startsWith('/p/')) {
+    return handleDownloadRequest(request, env);
   }
 
   // Handle static files

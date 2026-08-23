@@ -8,6 +8,7 @@ import { handleDriverRequest } from './drivers';
 import { handleTaskRequest } from './tasks';
 import { handleRefreshRequest } from './refresh';
 import { jsonResponse } from '../utils/response';
+import { getGuestUser } from '../utils/guest';
 
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -152,14 +153,18 @@ async function handlePublicSettings(env: Env): Promise<Response> {
   }
 }
 
+// AList returns a flat array of extension suffixes (with leading dots).
+// The frontend calls data.some(t => filename.toLowerCase().endsWith(t)) on it,
+// so `data` MUST be an array or the UI throws "sO.some is not a function".
 function handleArchiveExtensions(): Response {
   return jsonResponse({
     code: 200,
     message: 'success',
-    data: {
-      extensions: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst'],
-      internal: ['zip', 'tar', 'gz']
-    }
+    data: [
+      '.7z', '.rar', '.iso',
+      '.br', '.bz2', '.gz', '.lz4', '.lz', '.sz', '.s2', '.xz', '.zz', '.zst', '.tar',
+      '.zip', '.zip.001', '.7z.001', '.part1.rar',
+    ]
   });
 }
 
@@ -173,15 +178,18 @@ function handleOfflineDownloadTools(): Response {
 
 async function handleGetCurrentUser(request: Request, env: Env): Promise<Response> {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-  
+
+  // No/invalid token -> guest user (view + download only, no permissions)
+  const guestResponse = () => jsonResponse({ code: 200, message: 'success', data: getGuestUser() });
+
   if (!token) {
-    return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+    return guestResponse();
   }
 
   try {
     const payload = JSON.parse(atob(token));
     if (payload.exp < Date.now()) {
-      return jsonResponse({ code: 401, message: 'Token expired' }, 401);
+      return guestResponse();
     }
 
     const user = await env.DB.prepare(
@@ -189,7 +197,7 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
     ).bind(payload.userId).first();
 
     if (!user) {
-      return jsonResponse({ code: 401, message: 'User not found or disabled' }, 401);
+      return guestResponse();
     }
 
     return jsonResponse({
@@ -209,7 +217,7 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
       }
     });
   } catch (error) {
-    return jsonResponse({ code: 401, message: 'Invalid token' }, 401);
+    return guestResponse();
   }
 }
 

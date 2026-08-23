@@ -114,7 +114,7 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
 
 
 // Get storage that matches the given path
-async function getStorageForPath(path: string, env: Env): Promise<any> {
+export async function getStorageForPath(path: string, env: Env): Promise<any> {
   try {
     const storages = await env.DB.prepare(
       'SELECT * FROM storages WHERE disabled = 0 ORDER BY mount_path DESC'
@@ -147,7 +147,7 @@ async function getAllStorages(env: Env): Promise<any[]> {
 }
 
 // Get the relative path within a storage
-function getRelativePath(path: string, mountPath: string): string {
+export function getRelativePath(path: string, mountPath: string): string {
   if (mountPath === '/') return path;
   return path.substring(mountPath.length) || '/';
 }

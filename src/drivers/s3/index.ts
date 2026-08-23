@@ -162,11 +162,25 @@ export class S3Driver implements Driver {
 
   async get(path: string, cfg: Record<string, any>): Promise<Obj> {
     const key = this.getKey(path);
+
+    // Root path (or empty key) is always a directory, never a file.
+    // Otherwise HEAD on the bucket root returns 200 and we'd misreport it as a file.
+    if (!key) {
+      return createDirObj({ name: path === '/' ? '/' : path, modified: new Date().toISOString() });
+    }
+
     const url = `${this.baseUrl}/${key}`;
 
     const resp = await this.s3Fetch(url, { method: 'HEAD' });
 
     if (resp.ok) {
+      // Keys ending with '/' are folder markers
+      if (key.endsWith('/')) {
+        return createDirObj({
+          name: path.split('/').pop() || path,
+          modified: resp.headers.get('last-modified') || new Date().toISOString(),
+        });
+      }
       return createFileObj({
         name: path.split('/').pop() || path,
         size: parseInt(resp.headers.get('content-length') || '0'),
@@ -191,11 +205,13 @@ export class S3Driver implements Driver {
     const key = this.getKey(path);
     const url = `${this.baseUrl}/${key}`;
 
-    // Generate presigned URL using aws4fetch
-    // aws4fetch uses X-Amz-Expires header for presigned URL expiration
-    const signed = await this.client.sign(new Request(url, {
-      headers: { 'X-Amz-Expires': String(this.signUrlExpire) },
-    }), {
+    // Generate presigned URL using aws4fetch.
+    // X-Amz-Expires must be set as a QUERY parameter BEFORE signing:
+    // if set as a request header, aws4fetch includes it in SignedHeaders,
+    // and S3/B2 rejects the presigned URL (header not actually sent).
+    const signUrl = new URL(url);
+    signUrl.searchParams.set('X-Amz-Expires', String(this.signUrlExpire));
+    const signed = await this.client.sign(new Request(signUrl.toString()), {
       aws: { signQuery: true },
     });
 
