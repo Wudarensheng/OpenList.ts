@@ -135,6 +135,8 @@ export async function initializeDatabase(env: Env): Promise<void> {
     const defaultSettings = [
       { key: 'site_title', value: 'OpenList', help: 'Site title', type: 'string', group: 1 },
       { key: 'site_description', value: 'A file list program', help: 'Site description', type: 'string', group: 1 },
+      { key: 'logo', value: '/images/logo.svg', help: 'Logo (supports dark/light via one URL per line)', type: 'string', group: 1 },
+      { key: 'favicon', value: '/images/logo.png', help: 'Favicon', type: 'string', group: 1 },
       { key: 'max_connections', value: '0', help: 'Max connections (0 = unlimited)', type: 'number', group: 1 },
       { key: 'cache_expiration', value: '30', help: 'Default cache expiration (minutes)', type: 'number', group: 1 },
     ];

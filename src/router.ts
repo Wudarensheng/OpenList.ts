@@ -48,12 +48,12 @@ function handleManifest(): Response {
     theme_color: '#1890ff',
     icons: [
       {
-        src: 'https://res.oplist.org/logo/logo.png',
+        src: '/images/logo.png',
         sizes: '192x192',
         type: 'image/png'
       },
       {
-        src: 'https://res.oplist.org/logo/logo.png',
+        src: '/images/logo.png',
         sizes: '512x512',
         type: 'image/png'
       }

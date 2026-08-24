@@ -18,11 +18,11 @@
     "aws4fetch": "^1.0.20"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240405.0",
+    "@cloudflare/workers-types": "^5.20260823.1",
     "@types/node": "^20.12.7",
     "eslint": "^8.57.0",
     "typescript": "^5.4.5",
     "vitest": "^1.5.0",
-    "wrangler": "^3.48.0"
+    "wrangler": "^4.125.0"
   }
 }

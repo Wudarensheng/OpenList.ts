@@ -197,6 +197,9 @@ async function handleUpdateStorage(request: Request, env: Env): Promise<Response
 
     const addition = body.addition ? (typeof body.addition === 'string' ? body.addition : JSON.stringify(body.addition)) : null;
 
+    // Normalize optional fields to null so D1 doesn't choke on undefined.
+    const n = (v: any) => v ?? null;
+
     await env.DB.prepare(
       `UPDATE storages SET 
         mount_path = COALESCE(?, mount_path),
@@ -219,22 +222,22 @@ async function handleUpdateStorage(request: Request, env: Env): Promise<Response
         disable_proxy_sign = COALESCE(?, disable_proxy_sign)
        WHERE id = ?`
     ).bind(
-      body.mount_path,
-      body.order,
-      body.driver,
-      body.cache_expiration,
+      n(body.mount_path),
+      n(body.order),
+      n(body.driver),
+      n(body.cache_expiration),
       addition,
-      body.remark,
+      n(body.remark),
       body.disabled !== undefined ? (body.disabled ? 1 : 0) : null,
       body.disable_index !== undefined ? (body.disable_index ? 1 : 0) : null,
       body.enable_sign !== undefined ? (body.enable_sign ? 1 : 0) : null,
-      body.order_by,
-      body.order_direction,
-      body.extract_folder,
+      n(body.order_by),
+      n(body.order_direction),
+      n(body.extract_folder),
       body.web_proxy !== undefined ? (body.web_proxy ? 1 : 0) : null,
-      body.webdav_policy,
+      n(body.webdav_policy),
       body.proxy_range !== undefined ? (body.proxy_range ? 1 : 0) : null,
-      body.down_proxy_url,
+      n(body.down_proxy_url),
       body.disable_proxy_sign !== undefined ? (body.disable_proxy_sign ? 1 : 0) : null,
       body.id
     ).run();

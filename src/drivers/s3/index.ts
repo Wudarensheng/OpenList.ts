@@ -91,6 +91,12 @@ export class S3Driver implements Driver {
     return this.rootPath ? `${this.rootPath}/${cleanPath}`.replace(/\/+/g, '/') : cleanPath;
   }
 
+  // Percent-encode a key for use in a URL path, preserving path separators
+  // (encodeURIComponent would also encode '/').
+  private encodePath(key: string): string {
+    return key.split('/').map(seg => encodeURIComponent(seg)).join('/');
+  }
+
   private async s3Fetch(url: string, init: RequestInit): Promise<Response> {
     return this.client.fetch(url, init);
   }
@@ -169,7 +175,7 @@ export class S3Driver implements Driver {
       return createDirObj({ name: path === '/' ? '/' : path, modified: new Date().toISOString() });
     }
 
-    const url = `${this.baseUrl}/${key}`;
+    const url = `${this.baseUrl}/${this.encodePath(key)}`;
 
     const resp = await this.s3Fetch(url, { method: 'HEAD' });
 
@@ -188,17 +194,54 @@ export class S3Driver implements Driver {
       });
     }
 
-    if (resp.status === 404) {
-      const listUrl = `${this.baseUrl}/?list-type=2&prefix=${encodeURIComponent(key + '/')}&max-keys=1`;
-      const listResp = await this.s3Fetch(listUrl, { method: 'GET' });
-      const xml = await listResp.text();
-      if (xml.includes('<KeyCount>0</KeyCount>')) {
-        throw new Error('Not found');
-      }
-      return createDirObj({ name: path.split('/').pop() || path, modified: new Date().toISOString() });
+    // HEAD may be rejected by some S3-compatible providers (e.g. Backblaze B2
+    // returns 404/403 for HEAD on keys with non-ASCII characters even though
+    // GET and list work fine). Fall back to a list-objects query.
+    if (resp.status === 404 || resp.status === 403) {
+      const obj = await this.getViaList(key, path);
+      if (obj) return obj;
     }
 
     throw new Error(`S3 head failed: ${resp.status}`);
+  }
+
+  // Fallback for providers where HEAD is unreliable: probe via ListObjectsV2.
+  // - Directory: any CommonPrefixes/Contents under `<key>/`
+  // - File: an exact `<Key>` match equal to `key`
+  private async getViaList(key: string, path: string): Promise<Obj | null> {
+    const name = path.split('/').pop() || path;
+    const dirPrefix = key.endsWith('/') ? key : key + '/';
+
+    // 1) Directory check: children under `key/`
+    const dirParams = new URLSearchParams({ 'list-type': '2', 'delimiter': '/' });
+    dirParams.set('prefix', dirPrefix);
+    const dirResp = await this.s3Fetch(`${this.baseUrl}/?${dirParams.toString()}`, { method: 'GET' });
+    const dirXml = await dirResp.text();
+    if (dirResp.ok && (dirXml.includes('<CommonPrefixes>') || dirXml.includes('<Contents>'))) {
+      return createDirObj({ name, modified: new Date().toISOString() });
+    }
+
+    // 2) Exact file check: object whose key equals `key`
+    const fileParams = new URLSearchParams({ 'list-type': '2' });
+    fileParams.set('prefix', key);
+    const fileUrl = `${this.baseUrl}/?${fileParams.toString()}`;
+    const fileResp = await this.s3Fetch(fileUrl, { method: 'GET' });
+    if (!fileResp.ok) return null;
+    const fileXml = await fileResp.text();
+    const contents = fileXml.match(/<Contents>[\s\S]*?<\/Contents>/g) || [];
+    for (const c of contents) {
+      const keyMatch = c.match(/<Key>(.*?)<\/Key>/);
+      if (!keyMatch || keyMatch[1] !== key) continue;
+      const sizeMatch = c.match(/<Size>(.*?)<\/Size>/);
+      const modMatch = c.match(/<LastModified>(.*?)<\/LastModified>/);
+      return createFileObj({
+        name,
+        size: sizeMatch ? parseInt(sizeMatch[1]) : 0,
+        modified: modMatch ? modMatch[1] : new Date().toISOString(),
+      });
+    }
+
+    return null;
   }
 
   async link(path: string, cfg: Record<string, any>): Promise<LinkResult> {
@@ -226,7 +269,7 @@ export class S3Driver implements Driver {
 
   async mkdir(path: string, cfg: Record<string, any>): Promise<void> {
     const key = this.getKey(path) + '/';
-    const url = `${this.baseUrl}/${key}`;
+    const url = `${this.baseUrl}/${this.encodePath(key)}`;
     const resp = await this.s3Fetch(url, {
       method: 'PUT',
       headers: { 'content-type': 'application/x-directory' },
@@ -262,7 +305,7 @@ export class S3Driver implements Driver {
 
   async put(path: string, file: ArrayBuffer, contentType: string, cfg: Record<string, any>): Promise<void> {
     const key = this.getKey(path);
-    const url = `${this.baseUrl}/${key}`;
+    const url = `${this.baseUrl}/${this.encodePath(key)}`;
     const resp = await this.s3Fetch(url, {
       method: 'PUT',
       headers: { 'content-type': contentType },
@@ -274,10 +317,10 @@ export class S3Driver implements Driver {
   }
 
   private async copyFile(srcKey: string, dstKey: string): Promise<void> {
-    const url = `${this.baseUrl}/${dstKey}`;
+    const url = `${this.baseUrl}/${this.encodePath(dstKey)}`;
     const resp = await this.s3Fetch(url, {
       method: 'PUT',
-      headers: { 'x-amz-copy-source': `${this.bucket}/${srcKey}` },
+      headers: { 'x-amz-copy-source': `${this.bucket}/${this.encodePath(srcKey)}` },
     });
     if (!resp.ok) {
       throw new Error(`S3 copy failed: ${resp.status} ${await resp.text()}`);
@@ -285,7 +328,7 @@ export class S3Driver implements Driver {
   }
 
   private async deleteFile(key: string): Promise<void> {
-    const url = `${this.baseUrl}/${key}`;
+    const url = `${this.baseUrl}/${this.encodePath(key)}`;
     const resp = await this.s3Fetch(url, { method: 'DELETE' });
     if (!resp.ok && resp.status !== 404) {
       throw new Error(`S3 delete failed: ${resp.status} ${await resp.text()}`);

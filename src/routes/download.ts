@@ -92,22 +92,46 @@ async function proxyLink(link: { url: string; header?: Record<string, string> },
   const userAgent = request.headers.get('User-Agent');
   if (userAgent) headers['User-Agent'] = userAgent;
 
-  const upstream = await fetch(link.url, {
-    method: isHead ? 'HEAD' : 'GET',
-    headers,
-    redirect: 'follow',
-  });
+  // Presigned URLs are typically only valid for GET. A HEAD request to the
+  // upstream would be rejected (403) by providers like B2, so for HEAD we
+  // issue a ranged GET upstream and drop the body.
+  let upstream: Response;
+  let syntheticRange = false;
+  if (isHead) {
+    const headHeaders = { ...headers };
+    if (!headHeaders['Range']) {
+      headHeaders['Range'] = 'bytes=0-0';
+      syntheticRange = true;
+    }
+    upstream = await fetch(link.url, {
+      method: 'GET',
+      headers: headHeaders,
+      redirect: 'follow',
+    });
+  } else {
+    upstream = await fetch(link.url, {
+      method: 'GET',
+      headers,
+      redirect: 'follow',
+    });
+  }
 
   const filename = rawPath.split('/').pop() || 'file';
   const contentType = upstream.headers.get('Content-Type') || 'application/octet-stream';
 
   const outHeaders = new Headers();
   outHeaders.set('Content-Type', contentType);
-  if (upstream.headers.get('Content-Length')) {
-    outHeaders.set('Content-Length', upstream.headers.get('Content-Length')!);
-  }
   if (upstream.headers.get('Content-Range')) {
     outHeaders.set('Content-Range', upstream.headers.get('Content-Range')!);
+    // For HEAD probes using "bytes=0-0", Content-Range looks like
+    // "bytes 0-0/<total>". Report the full size as Content-Length.
+    const cr = upstream.headers.get('Content-Range')!;
+    const total = cr.split('/')[1];
+    if (total && total !== '*') {
+      outHeaders.set('Content-Length', total);
+    }
+  } else if (upstream.headers.get('Content-Length')) {
+    outHeaders.set('Content-Length', upstream.headers.get('Content-Length')!);
   }
   if (upstream.headers.get('Accept-Ranges')) {
     outHeaders.set('Accept-Ranges', upstream.headers.get('Accept-Ranges')!);
@@ -122,6 +146,11 @@ async function proxyLink(link: { url: string; header?: Record<string, string> },
     : `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
   outHeaders.set('Content-Disposition', disposition);
 
-  const status = upstream.status === 206 ? 206 : upstream.ok ? 200 : upstream.status;
+  let status = upstream.status === 206 ? 206 : upstream.ok ? 200 : upstream.status;
+  if (isHead && syntheticRange && status === 206) {
+    // A HEAD probe with a synthetic range returns 206 upstream; expose it as
+    // 200 with the full Content-Length so clients can size the file.
+    status = 200;
+  }
   return new Response(isHead ? null : upstream.body, { status, headers: outHeaders });
 }
