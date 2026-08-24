@@ -8,7 +8,7 @@
 
 すべて TypeScript で書かれており、Workers ランタイム上で動作し、ファイルツリーとダウンロードリンクは [Cloudflare D1](https://developers.cloudflare.com/d1/) にキャッシュされます。
 
-> **OpenList.ts** は OpenList/AList プロジェクトに触発された新規 TypeScript 書き直しであり、元プロジェクトとは**無関係**です。
+> **OpenList.ts** は OpenList エコシステムのプロジェクトであり、OpenList エコシステムに属する派生プロジェクトです。
 
 ---
 

@@ -8,7 +8,7 @@
 
 전체가 TypeScript로 작성되었으며, Workers 런타임에서 실행되고 파일 트리와 다운로드 링크는 [Cloudflare D1](https://developers.cloudflare.com/d1/)에 캐시됩니다.
 
-> **OpenList.ts**는 OpenList/AList 프로젝트에서 영감을 받아 처음부터 다시 작성한 TypeScript 버전입니다. 원본 프로젝트와 **무관**합니다.
+> **OpenList.ts**는 OpenList 생태계 프로젝트이자 OpenList의 파생 프로젝트로, OpenList 생태계에 속합니다.
 
 ---
 

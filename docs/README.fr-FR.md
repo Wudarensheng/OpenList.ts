@@ -8,7 +8,7 @@ Un programme de listage de fichiers pour [Cloudflare Workers](https://workers.cl
 
 Le tout est écrit en TypeScript, fonctionne sur le runtime Workers et stocke l'arborescence des fichiers et les liens de téléchargement dans [Cloudflare D1](https://developers.cloudflare.com/d1/).
 
-> **OpenList.ts** est une réécriture TypeScript de zéro inspirée par les projets OpenList/AList. Il n'est **pas** affilié aux projets originaux.
+> **OpenList.ts** est un projet de l'écosystème OpenList et un dérivé d'OpenList, faisant partie de l'écosystème OpenList.
 
 ---
 

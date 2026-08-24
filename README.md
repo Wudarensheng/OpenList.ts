@@ -8,7 +8,7 @@ A file-list program for [Cloudflare Workers](https://workers.cloudflare.com/) â€
 
 Everything is TypeScript, runs on the Workers runtime, and stores its file tree and download links in [Cloudflare D1](https://developers.cloudflare.com/d1/).
 
-> **OpenList.ts** is a from-scratch TypeScript rewrite inspired by the OpenList/AList project. It is **not** affiliated with the original projects.
+> **OpenList.ts** is an ecosystem project and a derivative of OpenList, part of the OpenList ecosystem.
 
 ---
 

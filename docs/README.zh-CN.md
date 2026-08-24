@@ -8,7 +8,7 @@
 
 全部使用 TypeScript 编写，运行在 Workers 运行时上，文件树和下载链接缓存存储在 [Cloudflare D1](https://developers.cloudflare.com/d1/) 中。
 
-> **OpenList.ts** 是受 OpenList/AList 项目启发的全新 TypeScript 重写版本，与原始项目**无关联**。
+> **OpenList.ts** 是 OpenList 生态项目及衍生项目，属于 OpenList 生态。
 
 ---
 
