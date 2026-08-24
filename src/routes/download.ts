@@ -8,6 +8,7 @@
 import { Env } from '../types';
 import { getStorageForPath, getRelativePath } from './fs';
 import { getDriverInstance } from '../drivers/registry';
+import { getCachedLink, cacheLink, acquireLock, releaseLock } from '../cache';
 
 export async function handleDownloadRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -37,6 +38,41 @@ async function getStorage(rawPath: string, env: Env): Promise<any> {
   return storage;
 }
 
+// Resolve a download link for a file, using the D1 link cache to avoid
+// re-hitting the storage provider on every download of the same file.
+// Singleflight ensures concurrent requests share one provider call.
+async function getLink(storage: any, rawPath: string, env: Env): Promise<{ url: string; header?: Record<string, string> }> {
+  const cached = await getCachedLink(storage.id, rawPath, env);
+  if (cached) return cached;
+
+  const lockKey = `dlink:${storage.id}:${rawPath}`;
+  const acquired = await acquireLock(lockKey, 30, env);
+  if (acquired) {
+    try {
+      const addition = JSON.parse(storage.addition);
+      const driver = await getDriverInstance(storage.driver, addition);
+      const relativePath = getRelativePath(rawPath, storage.mount_path);
+      const link = await driver.link(relativePath, addition);
+      const cacheExpiration = storage.cache_expiration || 30;
+      await cacheLink(storage.id, rawPath, link, cacheExpiration * 60, env);
+      return link;
+    } finally {
+      await releaseLock(lockKey, env);
+    }
+  }
+
+  // Another request is generating the link; wait briefly and read from cache.
+  await new Promise(resolve => setTimeout(resolve, 500));
+  const retry = await getCachedLink(storage.id, rawPath, env);
+  if (retry) return retry;
+
+  // Fallback: generate without caching (lock contention timed out).
+  const addition = JSON.parse(storage.addition);
+  const driver = await getDriverInstance(storage.driver, addition);
+  const relativePath = getRelativePath(rawPath, storage.mount_path);
+  return driver.link(relativePath, addition);
+}
+
 // GET /d/<path>: 302 to direct link, or proxy when web_proxy is enabled
 async function handleDirect(rawPath: string, request: Request, env: Env): Promise<Response> {
   const storage = await getStorage(rawPath, env);
@@ -47,10 +83,7 @@ async function handleDirect(rawPath: string, request: Request, env: Env): Promis
     return handleProxy(rawPath, request, env);
   }
 
-  const addition = JSON.parse(storage.addition);
-  const driver = await getDriverInstance(storage.driver, addition);
-  const relativePath = getRelativePath(rawPath, storage.mount_path);
-  const link = await driver.link(relativePath, addition);
+  const link = await getLink(storage, rawPath, env);
 
   // If the driver returned custom headers, a plain 302 cannot carry them -> proxy instead
   if (link.header && Object.keys(link.header).length > 0) {
@@ -72,10 +105,7 @@ async function handleProxy(rawPath: string, request: Request, env: Env): Promise
   const storage = await getStorage(rawPath, env);
   if (!storage) return new Response('Not Found', { status: 404 });
 
-  const addition = JSON.parse(storage.addition);
-  const driver = await getDriverInstance(storage.driver, addition);
-  const relativePath = getRelativePath(rawPath, storage.mount_path);
-  const link = await driver.link(relativePath, addition);
+  const link = await getLink(storage, rawPath, env);
 
   return proxyLink(link, rawPath, request);
 }

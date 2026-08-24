@@ -7,7 +7,6 @@ import {
   getCachedFile as getCachedFileFromDB,
   cacheFiles as cacheFilesToDB,
   getCachedLink,
-  cacheLink,
   invalidateCache as invalidateCacheInDB,
   invalidateLinkCache,
   invalidateSubtree,
@@ -220,40 +219,41 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
       const cacheValid = await isCacheValid(storage.id, path, env);
       if (cacheValid) {
         const cachedFiles = await getCachedFilesFromDB(storage.id, path, env);
-        if (cachedFiles && cachedFiles.length > 0) {
-          let content = cachedFiles.map((f: any) => ({
-            name: f.name,
-            size: f.size,
-            is_dir: f.is_folder === 1,
-            modified: f.modified,
-            created: f.ctime || f.modified,
-            sign: '',
-            thumb: '',
-            type: f.is_folder ? 0 : getFileType(f.name),
-            hashinfo: f.hash_info || '',
-            hash_info: {}
-          }));
+        // Note: cacheValid means the directory was cached (possibly empty).
+        // Return cached content even for an empty directory to avoid hitting
+        // the storage provider on every browse.
+        let content = cachedFiles.map((f: any) => ({
+          name: f.name,
+          size: f.size,
+          is_dir: f.is_folder === 1,
+          modified: f.modified,
+          created: f.ctime || f.modified,
+          sign: '',
+          thumb: '',
+          type: f.is_folder ? 0 : getFileType(f.name),
+          hashinfo: f.hash_info || '',
+          hash_info: {}
+        }));
 
-          // Apply pagination
-          const total = content.length;
-          if (perPage > 0) {
-            const start = (page - 1) * perPage;
-            content = content.slice(start, start + perPage);
-          }
-
-          return jsonResponse({
-            code: 200,
-            message: 'success',
-            data: {
-              content,
-              total,
-              readme: '',
-              header: '',
-              write: userRole >= 1,
-              provider: storage.driver
-            }
-          });
+        // Apply pagination
+        const total = content.length;
+        if (perPage > 0) {
+          const start = (page - 1) * perPage;
+          content = content.slice(start, start + perPage);
         }
+
+        return jsonResponse({
+          code: 200,
+          message: 'success',
+          data: {
+            content,
+            total,
+            readme: '',
+            header: '',
+            write: userRole >= 1,
+            provider: storage.driver
+          }
+        });
       }
     }
 
@@ -264,8 +264,9 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
     if (!lockAcquired) {
       // Another request is already fetching this path, wait and retry from cache
       await new Promise(resolve => setTimeout(resolve, 500));
+      const cacheValidNow = await isCacheValid(storage.id, path, env);
       const cachedFiles = await getCachedFilesFromDB(storage.id, path, env);
-      if (cachedFiles && cachedFiles.length > 0) {
+      if (cacheValidNow) {
         let content = cachedFiles.map((f: any) => ({
           name: f.name,
           size: f.size,
@@ -366,40 +367,15 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
       return jsonResponse({ code: 404, message: 'Storage not found' }, 404);
     }
 
-    const cacheExpiration = storage.cache_expiration || 30;
-
-    // Try cache first
+    // Try cache first. Browsing must NOT hit the storage provider: the file
+    // tree lives in D1, so /api/fs/get resolves purely from cache. The
+    // download URL (raw_url) is only filled in when it is already cached;
+    // otherwise /d/ or /p/ will generate it on download.
     const cachedFile = await getCachedFileFromDB(storage.id, path, env);
     if (cachedFile) {
-      // Try cached link first
       let linkUrl = '';
       const cachedLinkResult = await getCachedLink(storage.id, path, env);
-      if (cachedLinkResult) {
-        linkUrl = cachedLinkResult.url;
-      } else {
-        // Fetch link from driver with singleflight
-        const linkLockKey = `link:${storage.id}:${path}`;
-        const linkLockAcquired = await acquireLock(linkLockKey, 30, env);
-
-        if (!linkLockAcquired) {
-          // Wait for other request to populate link cache
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const retryLink = await getCachedLink(storage.id, path, env);
-          if (retryLink) linkUrl = retryLink.url;
-        } else {
-          try {
-            const driver = await getDriver(storage);
-            const relativePath = getRelativePath(path, storage.mount_path);
-            const link = await driver.link(relativePath, JSON.parse(storage.addition));
-            linkUrl = link.url;
-            await cacheLink(storage.id, path, link, cacheExpiration * 60, env);
-          } catch (e) {
-            // Ignore link errors for directories or unsupported drivers
-          } finally {
-            await releaseLock(linkLockKey, env);
-          }
-        }
-      }
+      if (cachedLinkResult) linkUrl = cachedLinkResult.url;
 
       return jsonResponse({
         code: 200,
@@ -424,12 +400,22 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
       });
     }
 
-    // Singleflight: try to acquire lock for fetching file info
+    // Not in the cache. If the parent directory was cached recently, the file
+    // genuinely does not exist in the cached tree - no provider request needed.
+    const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
+    const parentCached = await isCacheValid(storage.id, parentPath, env);
+    if (parentCached) {
+      return jsonResponse({ code: 404, message: 'File not found' }, 404);
+    }
+
+    // Cache for the parent is stale/missing, so this is a cold path: fall back
+    // to the driver to build the tree (and record the entry in D1).
+    const cacheExpiration = storage.cache_expiration || 30;
     const lockKey = `get:${storage.id}:${path}`;
     const lockAcquired = await acquireLock(lockKey, 30, env);
 
     if (!lockAcquired) {
-      // Wait for other request to populate cache
+      // Another request is populating the cache; retry once.
       await new Promise(resolve => setTimeout(resolve, 500));
       const retryFile = await getCachedFileFromDB(storage.id, path, env);
       if (retryFile) {
@@ -467,13 +453,18 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
       const relativePath = getRelativePath(path, storage.mount_path);
       const file = await driver.get(relativePath, JSON.parse(storage.addition));
 
-      let linkUrl = '';
+      // Persist the fetched entry so subsequent browses are provider-free.
       try {
-        const link = await driver.link(relativePath, JSON.parse(storage.addition));
-        linkUrl = link.url;
-        await cacheLink(storage.id, path, link, cacheExpiration * 60, env);
+        await cacheFilesToDB(storage.id, parentPath, [{
+          name: file.name,
+          size: file.size,
+          is_dir: file.is_dir,
+          modified: file.modified,
+          created: file.created,
+          hash_info: file.hash_info,
+        }], cacheExpiration, env);
       } catch (e) {
-        // Ignore link errors
+        // Cache write failure should not fail the request
       }
 
       return jsonResponse({
@@ -490,7 +481,7 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
           type: file.is_dir ? 0 : getFileType(file.name),
           hashinfo: file.hash_info || '',
           hash_info: {},
-          raw_url: linkUrl,
+          raw_url: '',
           readme: '',
           header: '',
           provider: storage.driver,
@@ -501,6 +492,12 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
       await releaseLock(lockKey, env);
     }
   } catch (error: any) {
+    // "Not found" / "S3 head failed: 404" from a driver means the file does
+    // not exist -> 404
+    const msg = String(error?.message || '');
+    if (msg.includes('Not found') || msg.includes('head failed: 404')) {
+      return jsonResponse({ code: 404, message: 'File not found' }, 404);
+    }
     console.error('Get file error:', error);
     return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
   }
@@ -527,9 +524,8 @@ async function handleListDirs(request: Request, env: Env): Promise<Response> {
           modified: f.modified
         }));
 
-      if (dirs.length > 0) {
-        return jsonResponse({ code: 200, message: 'success', data: dirs });
-      }
+      // Cache valid means the directory was listed (possibly empty).
+      return jsonResponse({ code: 200, message: 'success', data: dirs });
     }
 
     // Fetch from driver

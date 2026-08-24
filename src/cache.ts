@@ -57,35 +57,29 @@ export async function cacheFiles(
       'DELETE FROM files WHERE storage_id = ? AND parent_path = ?'
     ).bind(storageId, parentPath).run();
 
-    if (files.length === 0) {
-      // Empty directory: delete cache entry to force re-fetch next time
-      await env.DB.prepare(
-        'DELETE FROM file_cache WHERE storage_id = ? AND path = ?'
-      ).bind(storageId, parentPath).run();
-      return;
-    }
-
     // Build batch INSERT statements
     const stmts: D1PreparedStatement[] = [];
-    for (const file of files) {
-      const filePath = parentPath === '/' ? `/${file.name}` : `${parentPath}/${file.name}`;
-      stmts.push(
-        env.DB.prepare(
-          `INSERT OR REPLACE INTO files (id, path, parent_path, name, size, modified, ctime, is_folder, hash_info, storage_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          `${storageId}_${filePath}`,
-          filePath,
-          parentPath,
-          file.name,
-          file.size || 0,
-          file.modified || new Date().toISOString(),
-          file.created || file.modified || new Date().toISOString(),
-          file.is_dir ? 1 : 0,
-          file.hash_info || '',
-          storageId
-        )
-      );
+    if (files.length > 0) {
+      for (const file of files) {
+        const filePath = parentPath === '/' ? `/${file.name}` : `${parentPath}/${file.name}`;
+        stmts.push(
+          env.DB.prepare(
+            `INSERT OR REPLACE INTO files (id, path, parent_path, name, size, modified, ctime, is_folder, hash_info, storage_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            `${storageId}_${filePath}`,
+            filePath,
+            parentPath,
+            file.name,
+            file.size || 0,
+            file.modified || new Date().toISOString(),
+            file.created || file.modified || new Date().toISOString(),
+            file.is_dir ? 1 : 0,
+            file.hash_info || '',
+            storageId
+          )
+        );
+      }
     }
 
     // Execute in batches of 100 (D1 limit)
