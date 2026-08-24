@@ -1,6 +1,7 @@
 import { Env } from '../types';
 import { getDriverInstance } from '../drivers/registry';
 import { jsonResponse } from '../utils/response';
+import { isAnonymousEnabled } from './api';
 import {
   isCacheValid,
   getCachedFiles as getCachedFilesFromDB,
@@ -40,6 +41,14 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
     }
   }
 
+  // When anonymous access is disabled, requests without a valid token are rejected.
+  if (!userId) {
+    const anon = await isAnonymousEnabled(env);
+    if (!anon) {
+      return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+    }
+  }
+
   // POST /api/fs/list
   if (path === '/api/fs/list') {
     return handleListFiles(request, env, userId, userRole);
@@ -52,7 +61,7 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
 
   // POST /api/fs/dirs
   if (path === '/api/fs/dirs') {
-    return handleListDirs(request, env);
+    return handleListDirs(request, env, userRole);
   }
 
   // POST /api/fs/mkdir
@@ -179,7 +188,7 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
           created: s.modified || new Date().toISOString(),
           sign: '',
           thumb: '',
-          type: 0,
+          type: 1, // FOLDER
           hashinfo: '',
           hash_info: {}
         }));
@@ -230,7 +239,7 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
           created: f.ctime || f.modified,
           sign: '',
           thumb: '',
-          type: f.is_folder ? 0 : getFileType(f.name),
+          type: f.is_folder ? 1 : getFileType(f.name),
           hashinfo: f.hash_info || '',
           hash_info: {}
         }));
@@ -257,6 +266,44 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
       }
     }
 
+    // Only admins (role 2) trigger a provider fetch to populate the D1 file
+    // tree. Guest / normal users always read from the cached tree — even if it
+    // is stale — so browsing never hits the storage provider.
+    if (userRole < 2) {
+      const cachedFiles = await getCachedFilesFromDB(storage.id, path, env);
+      let content = cachedFiles.map((f: any) => ({
+        name: f.name,
+        size: f.size,
+        is_dir: f.is_folder === 1,
+        modified: f.modified,
+        created: f.ctime || f.modified,
+        sign: '',
+        thumb: '',
+        type: f.is_folder ? 1 : getFileType(f.name),
+        hashinfo: f.hash_info || '',
+        hash_info: {}
+      }));
+
+      const total = content.length;
+      if (perPage > 0) {
+        const start = (page - 1) * perPage;
+        content = content.slice(start, start + perPage);
+      }
+
+      return jsonResponse({
+        code: 200,
+        message: 'success',
+        data: {
+          content,
+          total,
+          readme: '',
+          header: '',
+          write: userRole >= 1,
+          provider: storage.driver
+        }
+      });
+    }
+
     // Singleflight: try to acquire lock for this path
     const lockKey = `list:${storage.id}:${path}`;
     const lockAcquired = await acquireLock(lockKey, 30, env);
@@ -275,7 +322,7 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
           created: f.ctime || f.modified,
           sign: '',
           thumb: '',
-          type: f.is_folder ? 0 : getFileType(f.name),
+          type: f.is_folder ? 1 : getFileType(f.name),
           hashinfo: f.hash_info || '',
           hash_info: {}
         }));
@@ -319,7 +366,7 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
         created: f.created || f.modified,
         sign: '',
         thumb: f.thumb || '',
-        type: f.is_dir ? 0 : getFileType(f.name),
+        type: f.is_dir ? 1 : getFileType(f.name),
         hashinfo: f.hash_info || '',
         hash_info: {}
       }));
@@ -388,7 +435,7 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
           created: cachedFile.ctime || cachedFile.modified,
           sign: '',
           thumb: '',
-          type: cachedFile.is_folder ? 0 : getFileType(cachedFile.name),
+          type: cachedFile.is_folder ? 1 : getFileType(cachedFile.name),
           hashinfo: cachedFile.hash_info || '',
           hash_info: {},
           raw_url: linkUrl,
@@ -405,6 +452,13 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
     const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
     const parentCached = await isCacheValid(storage.id, parentPath, env);
     if (parentCached) {
+      return jsonResponse({ code: 404, message: 'File not found' }, 404);
+    }
+
+    // Non-admins only read from the cached tree; they never trigger a provider
+    // request. A file that is not cached (and whose parent isn't cached either)
+    // is simply reported as not found.
+    if (userRole < 2) {
       return jsonResponse({ code: 404, message: 'File not found' }, 404);
     }
 
@@ -434,7 +488,7 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
             created: retryFile.ctime || retryFile.modified,
             sign: '',
             thumb: '',
-            type: retryFile.is_folder ? 0 : getFileType(retryFile.name),
+            type: retryFile.is_folder ? 1 : getFileType(retryFile.name),
             hashinfo: retryFile.hash_info || '',
             hash_info: {},
             raw_url: linkUrl,
@@ -478,7 +532,7 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
           created: file.created || file.modified,
           sign: '',
           thumb: file.thumb || '',
-          type: file.is_dir ? 0 : getFileType(file.name),
+          type: file.is_dir ? 1 : getFileType(file.name),
           hashinfo: file.hash_info || '',
           hash_info: {},
           raw_url: '',
@@ -503,7 +557,7 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
   }
 }
 
-async function handleListDirs(request: Request, env: Env): Promise<Response> {
+async function handleListDirs(request: Request, env: Env, userRole: number): Promise<Response> {
   try {
     const body = await request.json() as any;
     const path = body.path || '/';
@@ -526,6 +580,11 @@ async function handleListDirs(request: Request, env: Env): Promise<Response> {
 
       // Cache valid means the directory was listed (possibly empty).
       return jsonResponse({ code: 200, message: 'success', data: dirs });
+    }
+
+    // Non-admins only read from the cached tree; never fetch from the provider.
+    if (userRole < 2) {
+      return jsonResponse({ code: 200, message: 'success', data: [] });
     }
 
     // Fetch from driver
@@ -781,14 +840,16 @@ async function handleFormUpload(request: Request, env: Env): Promise<Response> {
 
 function getFileType(name: string): number {
   const ext = name.split('.').pop()?.toLowerCase() || '';
+  // Matches the OpenList/AList frontend FileType enum:
+  // UNKNOWN=0, FOLDER=1, VIDEO=2, AUDIO=3, TEXT=4, IMAGE=5
   const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico'];
   const videoExts = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'webm'];
   const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'wma'];
-  const docExts = ['doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md'];
+  const textExts = ['doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md'];
 
-  if (imageExts.includes(ext)) return 1;
-  if (videoExts.includes(ext)) return 2;
-  if (audioExts.includes(ext)) return 3;
-  if (docExts.includes(ext)) return 4;
-  return 0;
+  if (imageExts.includes(ext)) return 5; // IMAGE
+  if (videoExts.includes(ext)) return 2; // VIDEO
+  if (audioExts.includes(ext)) return 3; // AUDIO
+  if (textExts.includes(ext)) return 4;  // TEXT
+  return 0; // UNKNOWN
 }

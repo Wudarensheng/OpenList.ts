@@ -1,6 +1,16 @@
 import { Env } from './types';
 import { Obj as DriverFileObject, LinkResult } from './drivers/types';
 
+// D1 stores timestamps via SQLite datetime('now'), which produces UTC strings
+// like "2026-08-24 09:16:03" with no timezone marker. Parsing such a string
+// with `new Date(...)` treats it as LOCAL time, which on non-UTC machines
+// shifts the expiry (e.g. +8h on UTC+8 hosts) and makes every cache entry
+// appear already expired. Parse it explicitly as UTC instead.
+function parseD1Date(value: string): Date {
+  // "2026-08-24 09:16:03" -> "2026-08-24T09:16:03Z"
+  return new Date(value.replace(' ', 'T') + 'Z');
+}
+
 // Check if cache for a path is still valid
 export async function isCacheValid(storageId: number, path: string, env: Env): Promise<boolean> {
   try {
@@ -10,7 +20,7 @@ export async function isCacheValid(storageId: number, path: string, env: Env): P
 
     if (!row) return false;
 
-    const expiresAt = new Date((row as any).expires_at);
+    const expiresAt = parseD1Date((row as any).expires_at);
     return expiresAt > new Date();
   } catch {
     return false;

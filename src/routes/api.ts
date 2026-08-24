@@ -37,6 +37,11 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     return handleGetCurrentUser(request, env);
   }
 
+  // Update current user profile (username / password)
+  if (path === '/api/me/update' && request.method === 'POST') {
+    return handleUpdateCurrentUser(request, env);
+  }
+
   // Me sshkey endpoints
   if (path === '/api/me/sshkey/list') {
     return jsonResponse({ code: 200, message: 'success', data: { content: [], total: 0 } });
@@ -179,25 +184,28 @@ function handleOfflineDownloadTools(): Response {
 async function handleGetCurrentUser(request: Request, env: Env): Promise<Response> {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
 
-  // No/invalid token -> guest user (view + download only, no permissions)
+  // No/invalid token -> guest user (view + download only, no permissions).
+  // When the "anonymous" setting is disabled, anonymous access is forbidden.
   const guestResponse = () => jsonResponse({ code: 200, message: 'success', data: getGuestUser() });
+  const deniedResponse = () => jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
 
+  const anonymousEnabled = await isAnonymousEnabled(env);
   if (!token) {
-    return guestResponse();
+    return anonymousEnabled ? guestResponse() : deniedResponse();
   }
 
   try {
     const payload = JSON.parse(atob(token));
     if (payload.exp < Date.now()) {
-      return guestResponse();
+      return anonymousEnabled ? guestResponse() : deniedResponse();
     }
 
     const user = await env.DB.prepare(
-      'SELECT id, username, role, disabled FROM users WHERE id = ? AND disabled = 0'
+      'SELECT id, username, role, disabled, otp_secret FROM users WHERE id = ? AND disabled = 0'
     ).bind(payload.userId).first();
 
     if (!user) {
-      return guestResponse();
+      return anonymousEnabled ? guestResponse() : deniedResponse();
     }
 
     return jsonResponse({
@@ -210,15 +218,112 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
         disabled: (user as any).disabled === 1,
         permission: (user as any).role === 2 ? 0xFFFFFFFF : (user as any).role === 1 ? 0x00000007 : 0x00000001,
         sso_id: '',
-        otp: false,
+        otp: !!((user as any).otp_secret),
         password: '',
         base_path: '/',
         home_dir: '/'
       }
     });
   } catch (error) {
-    return guestResponse();
+    return anonymousEnabled ? guestResponse() : deniedResponse();
   }
+}
+
+// Read the "anonymous" setting from D1 (true = anonymous browsing allowed)
+export async function isAnonymousEnabled(env: Env): Promise<boolean> {
+  try {
+    const row = await env.DB.prepare(
+      'SELECT value FROM settings WHERE key = ?'
+    ).bind('anonymous').first();
+    const value = (row as any)?.value;
+    return value === 'true' || value === '1' || value === true;
+  } catch {
+    return false;
+  }
+}
+
+// POST /api/me/update - update the current user's username / password
+async function handleUpdateCurrentUser(request: Request, env: Env): Promise<Response> {
+  const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+  if (!token) {
+    return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+  }
+
+  try {
+    const payload = JSON.parse(atob(token));
+    if (payload.exp < Date.now()) {
+      return jsonResponse({ code: 401, message: 'Token expired' }, 401);
+    }
+
+    const user = await env.DB.prepare(
+      'SELECT * FROM users WHERE id = ? AND disabled = 0'
+    ).bind(payload.userId).first();
+
+    if (!user) {
+      return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+    }
+
+    const body = await request.json() as { username?: string; password?: string; old_password?: string; otp_code?: string };
+
+    // Verify old password if changing password or username
+    if (body.password) {
+      const oldPwd = body.old_password || '';
+      const storedPassword = (user as any).password;
+      const alistSalt = 'https://github.com/alist-org/alist';
+      const oldOk =
+        oldPwd === storedPassword ||
+        oldPwd === await sha256(`${storedPassword}-${alistSalt}`) ||
+        oldPwd === await sha256(storedPassword);
+      if (!oldOk) {
+        return jsonResponse({ code: 400, message: 'Old password is incorrect' }, 400);
+      }
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (body.username && body.username !== (user as any).username) {
+      // Check username uniqueness
+      const taken = await env.DB.prepare(
+        'SELECT id FROM users WHERE username = ? AND id != ?'
+      ).bind(body.username, (user as any).id).first();
+      if (taken) {
+        return jsonResponse({ code: 400, message: 'Username already exists' }, 400);
+      }
+      updates.push('username = ?');
+      values.push(body.username);
+    }
+
+    if (body.password) {
+      updates.push('password = ?');
+      values.push(body.password);
+    }
+
+    if (updates.length === 0) {
+      return jsonResponse({ code: 200, message: 'success' });
+    }
+
+    updates.push('updated_at = datetime(\'now\')');
+    values.push((user as any).id);
+
+    await env.DB.prepare(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = ?`
+    ).bind(...values).run();
+
+    return jsonResponse({ code: 200, message: 'success' });
+  } catch (error: any) {
+    console.error('Update user error:', error);
+    return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
+  }
+}
+
+async function sha256(input: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function handleIndexRequest(request: Request, env: Env): Promise<Response> {

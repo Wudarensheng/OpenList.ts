@@ -139,6 +139,7 @@ export async function initializeDatabase(env: Env): Promise<void> {
       { key: 'favicon', value: '/images/logo.png', help: 'Favicon', type: 'string', group: 1 },
       { key: 'max_connections', value: '0', help: 'Max connections (0 = unlimited)', type: 'number', group: 1 },
       { key: 'cache_expiration', value: '30', help: 'Default cache expiration (minutes)', type: 'number', group: 1 },
+      { key: 'anonymous', value: 'false', help: 'Allow anonymous browsing (guest access). When disabled, visitors must log in.', type: 'bool', group: 1 },
     ];
 
     for (const setting of defaultSettings) {

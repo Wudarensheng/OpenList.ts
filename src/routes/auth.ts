@@ -1,6 +1,7 @@
 import { Env } from '../types';
 import { jsonResponse } from '../utils/response';
 import { getGuestUser } from '../utils/guest';
+import { generateOtpSecret, verifyTotp, buildOtpAuthUri } from '../utils/otp';
 
 export async function handleAuthRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -12,6 +13,19 @@ export async function handleAuthRequest(request: Request, env: Env): Promise<Res
 
   if (path === '/api/auth/login/hash' && request.method === 'POST') {
     return handleLoginHash(request, env);
+  }
+
+  // 2FA endpoints
+  if (path === '/api/auth/2fa/generate' && request.method === 'POST') {
+    return handleGenerate2FA(request, env);
+  }
+
+  if (path === '/api/auth/2fa/verify' && request.method === 'POST') {
+    return handleVerify2FA(request, env);
+  }
+
+  if (path === '/api/auth/2fa/disable' && request.method === 'POST') {
+    return handleDisable2FA(request, env);
   }
 
   // SHA-256 test endpoint
@@ -45,7 +59,7 @@ export async function handleAuthRequest(request: Request, env: Env): Promise<Res
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
   try {
-    const body = await request.json() as { username: string; password: string };
+    const body = await request.json() as { username: string; password: string; otp_code?: string };
     const { username, password } = body;
 
     if (!username || !password) {
@@ -58,6 +72,15 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
 
     if (!user || (user as any).password !== password) {
       return jsonResponse({ code: 401, message: 'Invalid username or password' }, 401);
+    }
+
+    // 2FA check
+    const otpSecret = (user as any).otp_secret;
+    if (otpSecret) {
+      const ok = await verifyTotp(otpSecret, body.otp_code || '');
+      if (!ok) {
+        return jsonResponse({ code: 401, message: 'Invalid two-factor code' }, 401);
+      }
     }
 
     const token = generateToken((user as any).id);
@@ -96,52 +119,35 @@ async function handleLoginHash(request: Request, env: Env): Promise<Response> {
       return jsonResponse({ code: 401, message: 'Invalid username or password' }, 401);
     }
 
+    // Verify the supplied credentials (one of the supported hash formats)
     const storedPassword = (user as any).password;
+    const passwordOk =
+      hash === await sha256(`${storedPassword}-${ALIST_HASH_SALT}`) ||
+      hash === storedPassword ||
+      hash === await sha256(storedPassword);
 
-    // AList frontend sends sha256(plaintextPassword + "-" + ALIST_HASH_SALT)
-    // We compare the received hash against sha256(storedPassword + "-" + salt)
-    // which works when storedPassword is plaintext.
-    const alistHash = await sha256(`${storedPassword}-${ALIST_HASH_SALT}`);
-    if (hash === alistHash) {
-      const token = generateToken((user as any).id);
-      return jsonResponse({
-        code: 200,
-        message: 'success',
-        data: {
-          token,
-          user: { id: (user as any).id, username: (user as any).username, role: (user as any).role }
-        }
-      });
+    if (!passwordOk) {
+      return jsonResponse({ code: 401, message: 'Invalid username or password' }, 401);
     }
 
-    // Fallback: direct comparison (stored password might already be a hash)
-    if (hash === storedPassword) {
-      const token = generateToken((user as any).id);
-      return jsonResponse({
-        code: 200,
-        message: 'success',
-        data: {
-          token,
-          user: { id: (user as any).id, username: (user as any).username, role: (user as any).role }
-        }
-      });
+    // 2FA check
+    const otpSecret = (user as any).otp_secret;
+    if (otpSecret) {
+      const ok = await verifyTotp(otpSecret, body.otp_code || '');
+      if (!ok) {
+        return jsonResponse({ code: 401, message: 'Invalid two-factor code' }, 401);
+      }
     }
 
-    // Fallback: plain SHA-256 of stored password
-    const storedHash = await sha256(storedPassword);
-    if (hash === storedHash) {
-      const token = generateToken((user as any).id);
-      return jsonResponse({
-        code: 200,
-        message: 'success',
-        data: {
-          token,
-          user: { id: (user as any).id, username: (user as any).username, role: (user as any).role }
-        }
-      });
-    }
-
-    return jsonResponse({ code: 401, message: 'Invalid username or password' }, 401);
+    const token = generateToken((user as any).id);
+    return jsonResponse({
+      code: 200,
+      message: 'success',
+      data: {
+        token,
+        user: { id: (user as any).id, username: (user as any).username, role: (user as any).role }
+      }
+    });
   } catch (error: any) {
     console.error('Login hash error:', error);
     return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
@@ -152,28 +158,135 @@ function handleLogout(): Response {
   return jsonResponse({ code: 200, message: 'success' });
 }
 
+// POST /api/auth/2fa/generate - create a new TOTP secret for the current user
+async function handleGenerate2FA(request: Request, env: Env): Promise<Response> {
+  try {
+    const user = await requireAuthUser(request, env);
+    if (!user) return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+
+    if (user.otp_secret) {
+      return jsonResponse({ code: 400, message: 'Two-factor authentication is already enabled' }, 400);
+    }
+
+    const secret = generateOtpSecret();
+    return jsonResponse({
+      code: 200,
+      message: 'success',
+      data: {
+        secret,
+        qr: buildOtpAuthUri(secret, user.username),
+        url: buildOtpAuthUri(secret, user.username),
+      }
+    });
+  } catch (error: any) {
+    console.error('Generate 2FA error:', error);
+    return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
+  }
+}
+
+// POST /api/auth/2fa/verify - verify a code against a freshly generated secret and enable 2FA
+async function handleVerify2FA(request: Request, env: Env): Promise<Response> {
+  try {
+    const user = await requireAuthUser(request, env);
+    if (!user) return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+
+    const body = await request.json() as { code: string; secret?: string };
+
+    // If a secret was supplied (fresh from /generate), verify against it and persist.
+    // Otherwise fall back to the user's stored secret (used for re-verification).
+    const secret = body.secret || (user as any).otp_secret || '';
+    if (!secret) {
+      return jsonResponse({ code: 400, message: 'No secret provided' }, 400);
+    }
+
+    const ok = await verifyTotp(secret, body.code || '');
+    if (!ok) {
+      return jsonResponse({ code: 401, message: 'Invalid code' }, 401);
+    }
+
+    if (body.secret) {
+      await env.DB.prepare(
+        'UPDATE users SET otp_secret = ? WHERE id = ?'
+      ).bind(secret, user.id).run();
+    }
+
+    return jsonResponse({ code: 200, message: 'success' });
+  } catch (error: any) {
+    console.error('Verify 2FA error:', error);
+    return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
+  }
+}
+
+// POST /api/auth/2fa/disable - disable 2FA for the current user (requires valid code)
+async function handleDisable2FA(request: Request, env: Env): Promise<Response> {
+  try {
+    const user = await requireAuthUser(request, env);
+    if (!user) return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+
+    const body = await request.json() as { code: string };
+    const otpSecret = (user as any).otp_secret;
+    if (!otpSecret) {
+      return jsonResponse({ code: 400, message: 'Two-factor authentication is not enabled' }, 400);
+    }
+
+    const ok = await verifyTotp(otpSecret, body.code || '');
+    if (!ok) {
+      return jsonResponse({ code: 401, message: 'Invalid code' }, 401);
+    }
+
+    await env.DB.prepare(
+      'UPDATE users SET otp_secret = NULL WHERE id = ?'
+    ).bind(user.id).run();
+
+    return jsonResponse({ code: 200, message: 'success' });
+  } catch (error: any) {
+    console.error('Disable 2FA error:', error);
+    return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
+  }
+}
+
+// Resolve the authenticated user (not the guest) or return null
+async function requireAuthUser(request: Request, env: Env): Promise<any | null> {
+  const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+  if (!token) return null;
+
+  try {
+    const userId = verifyToken(token);
+    if (!userId) return null;
+
+    return await env.DB.prepare(
+      'SELECT * FROM users WHERE id = ? AND disabled = 0'
+    ).bind(userId).first();
+  } catch {
+    return null;
+  }
+}
+
 async function handleGetCurrentUser(request: Request, env: Env): Promise<Response> {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
 
-  // No/invalid token -> guest user (view + download only, no permissions)
+  // No/invalid token -> guest user (view + download only, no permissions).
+  // When the "anonymous" setting is disabled, anonymous access is forbidden.
   const guestResponse = () => jsonResponse({ code: 200, message: 'success', data: getGuestUser() });
+  const deniedResponse = () => jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
 
+  const anonymousEnabled = await isAnonymousEnabled(env);
   if (!token) {
-    return guestResponse();
+    return anonymousEnabled ? guestResponse() : deniedResponse();
   }
 
   try {
     const userId = verifyToken(token);
     if (!userId) {
-      return guestResponse();
+      return anonymousEnabled ? guestResponse() : deniedResponse();
     }
 
     const user = await env.DB.prepare(
-      'SELECT id, username, role, disabled FROM users WHERE id = ? AND disabled = 0'
+      'SELECT id, username, role, disabled, otp_secret FROM users WHERE id = ? AND disabled = 0'
     ).bind(userId).first();
 
     if (!user) {
-      return guestResponse();
+      return anonymousEnabled ? guestResponse() : deniedResponse();
     }
 
     return jsonResponse({
@@ -186,14 +299,27 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
         disabled: (user as any).disabled === 1,
         permission: (user as any).role === 2 ? 0xFFFFFFFF : (user as any).role === 1 ? 0x00000007 : 0x00000001,
         sso_id: '',
-        otp: false,
+        otp: !!((user as any).otp_secret),
         password: '',
         base_path: '/',
         home_dir: '/'
       }
     });
   } catch (error) {
-    return guestResponse();
+    return anonymousEnabled ? guestResponse() : deniedResponse();
+  }
+}
+
+// Read the "anonymous" setting from D1 (true = anonymous browsing allowed)
+async function isAnonymousEnabled(env: Env): Promise<boolean> {
+  try {
+    const row = await env.DB.prepare(
+      'SELECT value FROM settings WHERE key = ?'
+    ).bind('anonymous').first();
+    const value = (row as any)?.value;
+    return value === 'true' || value === '1' || value === true;
+  } catch {
+    return false;
   }
 }
 
