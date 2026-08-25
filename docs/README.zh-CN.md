@@ -2,7 +2,7 @@
 
 [![部署到 Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
 
-[English](../README.md) · [中文](./README.zh-CN.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [한국어](./README.ko-KR.md)
+[English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
 一个基于 [Cloudflare Workers](https://workers.cloudflare.com/) 的文件列表程序 —— 采用 OpenList/AList 风格网页界面，可浏览和管理 S3 兼容存储（Backblaze B2、Cloudflare R2、AWS S3、MinIO 等）、Microsoft OneDrive、阿里云盘、PikPak 和 Dropbox 上的文件。
 

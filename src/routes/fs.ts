@@ -414,6 +414,32 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
       return jsonResponse({ code: 404, message: 'Storage not found' }, 404);
     }
 
+    // The root path always exists as a directory. The frontend calls
+    // /api/fs/get on "/" when loading the root, so never 404 it.
+    if (path === '/') {
+      return jsonResponse({
+        code: 200,
+        message: 'success',
+        data: {
+          name: '/',
+          size: 0,
+          is_dir: true,
+          modified: new Date().toISOString(),
+          created: new Date().toISOString(),
+          sign: '',
+          thumb: '',
+          type: 1, // FOLDER
+          hashinfo: '',
+          hash_info: {},
+          raw_url: '',
+          readme: '',
+          header: '',
+          provider: storage.driver,
+          related: []
+        }
+      });
+    }
+
     // Try cache first. Browsing must NOT hit the storage provider: the file
     // tree lives in D1, so /api/fs/get resolves purely from cache. The
     // download URL (raw_url) is only filled in when it is already cached;

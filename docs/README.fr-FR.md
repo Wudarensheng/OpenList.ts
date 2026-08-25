@@ -2,7 +2,7 @@
 
 [![Déployer sur Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
 
-[English](../README.md) · [中文](./README.zh-CN.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [한국어](./README.ko-KR.md)
+[English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
 Un programme de listage de fichiers pour [Cloudflare Workers](https://workers.cloudflare.com/) — une interface web de type OpenList/AList qui parcourt et gère des fichiers sur le stockage compatible S3 (Backblaze B2, Cloudflare R2, AWS S3, MinIO, …), Microsoft OneDrive, Alibaba Cloud Drive, PikPak et Dropbox.
 

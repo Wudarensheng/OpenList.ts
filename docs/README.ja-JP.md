@@ -2,7 +2,7 @@
 
 [![Cloudflare Workers にデプロイ](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
 
-[English](../README.md) · [中文](./README.zh-CN.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [한국어](./README.ko-KR.md)
+[English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
 [Cloudflare Workers](https://workers.cloudflare.com/) 上で動作するファイルリストプログラムです。OpenList/AList 風の Web UI で、S3 互換ストレージ（Backblaze B2、Cloudflare R2、AWS S3、MinIO など）、Microsoft OneDrive、Alibaba Cloud Drive、PikPak、Dropbox 上のファイルを閲覧・管理できます。
 

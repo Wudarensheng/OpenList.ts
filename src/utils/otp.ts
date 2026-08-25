@@ -111,3 +111,12 @@ export function buildOtpAuthUri(secret: string, username: string, issuer = 'Open
   });
   return `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(username)}?${params.toString()}`;
 }
+
+// Render a QR code as an SVG data URI (pure JS, works in Workers).
+// The frontend renders this with <img src=...> in the 2FA setup dialog.
+import QRCode from 'qrcode';
+
+export async function qrSvgDataUri(text: string, width = 220): Promise<string> {
+  const svg = await QRCode.toString(text, { type: 'svg', margin: 1, width, color: { dark: '#000000', light: '#ffffff' } });
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}

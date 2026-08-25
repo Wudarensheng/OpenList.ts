@@ -71,6 +71,9 @@ export async function cacheFiles(
     const stmts: D1PreparedStatement[] = [];
     if (files.length > 0) {
       for (const file of files) {
+        // Skip the root marker itself (name "/" or empty) - it would produce a
+        // bogus "//" entry when parentPath is "/".
+        if (!file.name || file.name === '/') continue;
         const filePath = parentPath === '/' ? `/${file.name}` : `${parentPath}/${file.name}`;
         stmts.push(
           env.DB.prepare(

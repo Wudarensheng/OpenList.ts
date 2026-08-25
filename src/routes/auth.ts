@@ -1,7 +1,7 @@
 import { Env } from '../types';
 import { jsonResponse } from '../utils/response';
 import { getGuestUser } from '../utils/guest';
-import { generateOtpSecret, verifyTotp, buildOtpAuthUri } from '../utils/otp';
+import { generateOtpSecret, verifyTotp, buildOtpAuthUri, qrSvgDataUri } from '../utils/otp';
 
 export async function handleAuthRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -169,13 +169,14 @@ async function handleGenerate2FA(request: Request, env: Env): Promise<Response> 
     }
 
     const secret = generateOtpSecret();
+    const otpauth = buildOtpAuthUri(secret, user.username);
     return jsonResponse({
       code: 200,
       message: 'success',
       data: {
         secret,
-        qr: buildOtpAuthUri(secret, user.username),
-        url: buildOtpAuthUri(secret, user.username),
+        qr: await qrSvgDataUri(otpauth),
+        url: otpauth,
       }
     });
   } catch (error: any) {

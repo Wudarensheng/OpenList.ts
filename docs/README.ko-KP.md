@@ -1,8 +1,8 @@
 # OpenList.ts
 
-[![Cloudflare Workers에 배포](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
+[![Cloudflare Workers에 배치](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
 
-[English](../README.md) · [中文](./README.zh-CN.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [한국어](./README.ko-KR.md)
+[English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
 [Cloudflare Workers](https://workers.cloudflare.com/)용 파일 목록 프로그램입니다. OpenList/AList 스타일의 웹 UI로 S3 호환 스토리지(Backblaze B2, Cloudflare R2, AWS S3, MinIO 등), Microsoft OneDrive, Alibaba Cloud Drive, PikPak, Dropbox의 파일을 탐색하고 관리합니다.
 
@@ -27,13 +27,13 @@
 
 ---
 
-## 🚀 빠른 배포
+## 🚀 빠른 배치
 
-[![Cloudflare Workers에 배포](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
+[![Cloudflare Workers에 배치](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
 
-위 버튼을 클릭하면 Cloudflare 계정에 직접 배포됩니다(Workers와 D1이 자동 생성). 배포 후 Worker URL을 열고 기본 자격 증명으로 로그인한 다음 관리자 패널에서 스토리지를 추가하세요.
+위 버튼을 클릭하면 Cloudflare 계정에 직접 배치됩니다(Workers와 D1이 자동 생성). 배치 후 Worker URL을 열고 기본 자격 증명으로 로그인한 다음 관리자 패널에서 스토리지를 추가하세요.
 
-### 수동 배포
+### 수동 배치
 
 필수 조건: [Node.js](https://nodejs.org/) 18+ 및 [Wrangler](https://developers.cloudflare.com/workers/wrangler/).
 
@@ -54,7 +54,7 @@ npm run db:init       # = wrangler d1 execute openlist-db --file=./src/models/sc
 # 5. (선택) 로컬 미리보기
 npm run dev           # http://127.0.0.1:8787
 
-# 6. Cloudflare에 배포
+# 6. Cloudflare에 배치
 npm run deploy
 ```
 
@@ -76,7 +76,7 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 | `npm run typecheck` | TypeScript 타입 검사(`tsc --noEmit`) |
 | `npm run lint` | `src`에 대해 ESLint |
 | `npm test` | Vitest 테스트 러너 |
-| `npm run deploy` | Cloudflare에 배포 |
+| `npm run deploy` | Cloudflare에 배치 |
 | `npm run db:reset` | 모든 테이블 삭제 후 스키마 재초기화 |
 
 ---
