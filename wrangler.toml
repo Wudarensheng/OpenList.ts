@@ -10,4 +10,8 @@ ENVIRONMENT = "production"
 [[d1_databases]]
 binding = "DB"
 database_name = "openlist-db"
-database_id = "f7b96b7c-e5c9-43f7-a69d-64ca9f38fb62"
+# database_id is left empty so that the one-click "Deploy to Cloudflare
+# Workers" flow can create a fresh D1 database in the deployer's account.
+# For manual deployment, run `npx wrangler d1 create openlist-db` and paste
+# the returned database_id here.
+database_id = ""

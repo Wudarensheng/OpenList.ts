@@ -4,13 +4,13 @@
   "description": "OpenList TypeScript/JavaScript rewrite for Cloudflare Workers",
   "main": "dist/worker.js",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev -c wrangler.local.toml",
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
-    "db:init": "wrangler d1 execute openlist-db --file=./src/models/schema.sql",
-    "db:reset": "wrangler d1 execute openlist-db --command='DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS file_cache; DROP TABLE IF EXISTS settings; DROP TABLE IF EXISTS storages; DROP TABLE IF EXISTS users;' && npm run db:init"
+    "db:init": "wrangler d1 execute openlist-db -c wrangler.local.toml --file=./src/models/schema.sql",
+    "db:reset": "wrangler d1 execute openlist-db -c wrangler.local.toml --command='DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS file_cache; DROP TABLE IF EXISTS settings; DROP TABLE IF EXISTS storages; DROP TABLE IF EXISTS users;' && npm run db:init"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.540.0",

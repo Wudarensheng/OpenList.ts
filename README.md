@@ -31,7 +31,14 @@ Everything is TypeScript, runs on the Workers runtime, and stores its file tree 
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
 
-Click the button above to deploy directly to your Cloudflare account (Workers + D1 are created automatically). After deployment, open your Worker URL and log in with the default credentials, then add a storage in the admin panel.
+Click the button above to deploy directly to your Cloudflare account. The one-click
+flow reads `wrangler.toml`, creates a fresh D1 database in *your* account (the
+`database_id` is intentionally left empty in the repo), and deploys the worker.
+After deployment, open your Worker URL and log in with the default credentials,
+then add a storage in the admin panel.
+
+> The worker auto-creates the D1 schema on first run (`src/models/init.ts`), so no
+> manual schema step is needed after deployment.
 
 ### Manual deployment
 
@@ -52,11 +59,16 @@ npx wrangler d1 create openlist-db
 npm run db:init       # = wrangler d1 execute openlist-db --file=./src/models/schema.sql
 
 # 5. (Optional) preview locally
-npm run dev           # http://127.0.0.1:8787
+npm run dev           # http://127.0.0.1:8787  (uses wrangler.local.toml)
 
 # 6. Deploy to Cloudflare
 npm run deploy
 ```
+
+> `wrangler.toml` keeps `database_id` empty so the one-click deploy flow can create
+> a fresh database per deployer. For manual deployment, fill it in with the ID from
+> step 3. Local development uses `wrangler.local.toml` (which carries a local ID) via
+> `npm run dev`, so you never need to touch the main config.
 
 ---
 
