@@ -75,6 +75,7 @@ async function ensureDrivers(): Promise<void> {
     aliyundriveMod,
     pikpakMod,
     dropboxMod,
+    cloud189Mod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -82,6 +83,7 @@ async function ensureDrivers(): Promise<void> {
     import('./aliyundrive_open'),
     import('./pikpak'),
     import('./dropbox'),
+    import('./cloud189'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -91,6 +93,7 @@ async function ensureDrivers(): Promise<void> {
   if (aliyundriveMod.aliyundriveOpenConfig) registerDriver(aliyundriveMod.AliyundriveOpenDriver, aliyundriveMod.aliyundriveOpenConfig, aliyundriveMod.aliyundriveOpenAdditional);
   if (pikpakMod.pikpakConfig) registerDriver(pikpakMod.PikPakDriver, pikpakMod.pikpakConfig, pikpakMod.pikpakAdditional);
   if (dropboxMod.dropboxConfig) registerDriver(dropboxMod.DropboxDriver, dropboxMod.dropboxConfig, dropboxMod.dropboxAdditional);
+  if (cloud189Mod.cloud189Config) registerDriver(cloud189Mod.Cloud189Driver, cloud189Mod.cloud189Config, cloud189Mod.cloud189Additional);
 }
 
 /**
