@@ -129,7 +129,10 @@ async function handleCreateStorage(request: Request, env: Env): Promise<Response
     ).bind(body.mount_path).first();
 
     if (existing) {
-      return jsonResponse({ code: 400, message: 'Mount path already exists' }, 400);
+      return jsonResponse({
+        code: 409,
+        message: `挂载路径 ${body.mount_path} 已被其他存储占用，请更换一个挂载路径（如 /onedrive）`
+      }, 409);
     }
 
     const addition = typeof body.addition === 'string' ? body.addition : JSON.stringify(body.addition);
