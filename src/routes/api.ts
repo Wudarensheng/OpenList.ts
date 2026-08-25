@@ -185,8 +185,11 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
 
   // No/invalid token -> guest user (view + download only, no permissions).
-  // When the "anonymous" setting is disabled, anonymous access is forbidden.
-  const guestResponse = () => jsonResponse({ code: 200, message: 'success', data: getGuestUser() });
+  // When the guest user is disabled, anonymous access is forbidden.
+  const guestResponse = async () => {
+    const guest = await getGuestUserFromDB(env);
+    return jsonResponse({ code: 200, message: 'success', data: guest });
+  };
   const deniedResponse = () => jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
 
   const anonymousEnabled = await isAnonymousEnabled(env);
@@ -229,14 +232,44 @@ async function handleGetCurrentUser(request: Request, env: Env): Promise<Respons
   }
 }
 
-// Read the "anonymous" setting from D1 (true = anonymous browsing allowed)
+// Load the guest user row from the DB (fall back to the hardcoded model if
+// the row is missing).
+async function getGuestUserFromDB(env: Env): Promise<Record<string, any>> {
+  try {
+    const user = await env.DB.prepare(
+      'SELECT * FROM users WHERE username = ?'
+    ).bind('guest').first();
+    if (user) {
+      return {
+        id: (user as any).id,
+        username: (user as any).username,
+        role: (user as any).role,
+        disabled: (user as any).disabled === 1,
+        permission: (user as any).permission ?? 0,
+        sso_id: (user as any).sso_id || '',
+        otp: !!((user as any).otp_secret),
+        password: '',
+        base_path: (user as any).base_path || '/',
+        home_dir: (user as any).home_dir || '/',
+        allow_ldap: false,
+      };
+    }
+  } catch {
+    // fall through to hardcoded model
+  }
+  return getGuestUser();
+}
+
+// Anonymous browsing is enabled when the "guest" user exists in the users
+// table and is not disabled. This lets admins toggle guest access directly in
+// the user list.
 export async function isAnonymousEnabled(env: Env): Promise<boolean> {
   try {
-    const row = await env.DB.prepare(
-      'SELECT value FROM settings WHERE key = ?'
-    ).bind('anonymous').first();
-    const value = (row as any)?.value;
-    return value === 'true' || value === '1' || value === true;
+    const user = await env.DB.prepare(
+      'SELECT id, disabled FROM users WHERE username = ?'
+    ).bind('guest').first();
+    if (!user) return false;
+    return (user as any).disabled !== 1;
   } catch {
     return false;
   }

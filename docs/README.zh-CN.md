@@ -20,7 +20,7 @@
 - 🔐 用户认证与授权（访客 / 普通用户 / 管理员）
 - 🛡️ **TOTP 双因素认证（2FA）** —— 兼容 Google Authenticator
 - 🔑 修改密码与个人资料
-- 👤 可选的匿名（访客）浏览，默认关闭
+- 👤 通过 `guest` 用户账号提供可选的匿名（访客）浏览，默认关闭
 - 🖥️ 管理面板：存储、设置、用户和驱动管理
 - 📥 直链下载（`/d/`）与代理下载（`/p/`），支持 Range/HEAD
 - 🔄 预签名链接缓存与单飞去重
@@ -93,8 +93,8 @@ D1 数据库在本地 `.wrangler/state` 下模拟，schema 和缓存数据重启
 
 ### 角色
 
-- **访客**（`role 0`）— 匿名访问者。仅在启用 `anonymous` 设置时可见。
-- **普通用户**（`role 1`）— 可浏览和管理文件。
+- **访客**（`role 1`）— 匿名访问者。`guest` 用户账号默认**停用**，在用户列表中启用它即可允许匿名浏览。
+- **普通用户**（`role 0`）— 可浏览和管理文件。
 - **管理员**（`role 2`）— 完整权限，包括管理面板。
 
 > 浏览时不会联系存储提供商。只有**管理员**访问冷路径时才会触发提供商拉取以填充 D1 文件树；访客和普通用户始终从缓存读取。
@@ -265,7 +265,7 @@ D1 数据库在本地 `.wrangler/state` 下模拟，schema 和缓存数据重启
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/public/settings` | 公开设置（包含 `anonymous`） |
+| GET | `/api/public/settings` | 公开设置（站点标题、logo、favicon 等） |
 | GET | `/api/public/archive_extensions` | 压缩文件扩展名 |
 | GET | `/api/public/offline_download_tools` | 离线下载工具（占位） |
 
@@ -281,7 +281,8 @@ D1 数据库在本地 `.wrangler/state` 下模拟，schema 和缓存数据重启
 | `favicon` | `/images/logo.png` | 站点图标 |
 | `max_connections` | `0` | 最大连接数（0 = 不限） |
 | `cache_expiration` | `30` | 默认缓存有效期（分钟） |
-| `anonymous` | `false` | 是否允许匿名浏览。为 `false` 时访问者必须登录。 |
+
+> 匿名浏览由用户列表中的 **`guest` 用户账号**控制 —— 默认停用。启用它即可允许访客无需登录浏览。
 
 ---
 

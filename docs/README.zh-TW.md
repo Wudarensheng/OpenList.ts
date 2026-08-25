@@ -20,7 +20,7 @@
 - 🔐 用戶認證與授權（訪客 / 普通用戶 / 管理員）
 - 🛡️ **TOTP 雙因素認證（2FA）** —— 兼容 Google Authenticator
 - 🔑 修改密碼與個人資料
-- 👤 可選的匿名（訪客）瀏覽，默認關閉
+- 👤 通過 `guest` 用戶賬號提供可選的匿名（訪客）瀏覽，默認關閉
 - 🖥️ 管理面板：存儲、設置、用戶和驅動管理
 - 📥 直鏈下載（`/d/`）與代理下載（`/p/`），支持 Range/HEAD
 - 🔄 預簽名鏈接緩存與單飛去重
@@ -93,8 +93,8 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 
 ### 角色
 
-- **訪客**（`role 0`）— 匿名訪問者。僅在啟用 `anonymous` 設置時可見。
-- **普通用戶**（`role 1`）— 可瀏覽和管理文件。
+- **訪客**（`role 1`）— 匿名訪問者。`guest` 用戶賬號默認**停用**，在用戶列表中啟用它即可允許匿名瀏覽。
+- **普通用戶**（`role 0`）— 可瀏覽和管理文件。
 - **管理員**（`role 2`）— 完整權限，包括管理面板。
 
 > 瀏覽時不會聯繫存儲提供商。只有**管理員**訪問冷路徑時才會觸發提供商拉取以填充 D1 文件樹；訪客和普通用戶始終從緩存讀取。
@@ -265,7 +265,7 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/api/public/settings` | 公開設置（包含 `anonymous`） |
+| GET | `/api/public/settings` | 公開設置（站點標題、logo、favicon 等） |
 | GET | `/api/public/archive_extensions` | 壓縮文件擴展名 |
 | GET | `/api/public/offline_download_tools` | 離線下載工具（佔位） |
 
@@ -281,7 +281,8 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 | `favicon` | `/images/logo.png` | 站點圖標 |
 | `max_connections` | `0` | 最大連接數（0 = 不限） |
 | `cache_expiration` | `30` | 默認緩存有效期（分鐘） |
-| `anonymous` | `false` | 是否允許匿名瀏覽。為 `false` 時訪問者必須登錄。 |
+
+> 匿名瀏覽由用戶列表中的 **`guest` 用戶賬號**控制 —— 默認停用。啟用它即可允許訪客無需登錄瀏覽。
 
 ---
 

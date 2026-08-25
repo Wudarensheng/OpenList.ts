@@ -131,6 +131,19 @@ export async function initializeDatabase(env: Env): Promise<void> {
       ).bind('admin', 'admin', 2).run();
     }
 
+    // Insert the guest account as a real user row, disabled by default.
+    // Administrators can enable/disable anonymous browsing by toggling this
+    // user's disabled flag in the user list.
+    const guestUser = await env.DB.prepare(
+      'SELECT id FROM users WHERE username = ?'
+    ).bind('guest').first();
+
+    if (!guestUser) {
+      await env.DB.prepare(
+        'INSERT INTO users (username, password, role, disabled, permission) VALUES (?, ?, ?, ?, ?)'
+      ).bind('guest', '', 1, 1, 0).run();
+    }
+
     // Insert default settings if not exist
     const defaultSettings = [
       { key: 'site_title', value: 'OpenList', help: 'Site title', type: 'string', group: 1 },
@@ -139,7 +152,6 @@ export async function initializeDatabase(env: Env): Promise<void> {
       { key: 'favicon', value: '/images/logo.png', help: 'Favicon', type: 'string', group: 1 },
       { key: 'max_connections', value: '0', help: 'Max connections (0 = unlimited)', type: 'number', group: 1 },
       { key: 'cache_expiration', value: '30', help: 'Default cache expiration (minutes)', type: 'number', group: 1 },
-      { key: 'anonymous', value: 'false', help: 'Allow anonymous browsing (guest access). When disabled, visitors must log in.', type: 'bool', group: 1 },
     ];
 
     for (const setting of defaultSettings) {

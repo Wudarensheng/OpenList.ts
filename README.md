@@ -20,7 +20,7 @@ Everything is TypeScript, runs on the Workers runtime, and stores its file tree 
 - 🔐 User authentication & authorization (guest / user / admin roles)
 - 🛡️ **TOTP two-factor authentication (2FA)** — Google Authenticator compatible
 - 🔑 Password change & profile update
-- 👤 Optional anonymous (guest) browsing, disabled by default
+- 👤 Optional anonymous (guest) browsing via the `guest` user account, disabled by default
 - 🖥️ Admin panel: storage, settings, users and drivers management
 - 📥 Direct download (`/d/`) and proxied download (`/p/`) with Range/HEAD support
 - 🔄 Presigned-link caching with singleflight deduplication
@@ -93,8 +93,9 @@ Other useful scripts:
 
 ### Roles
 
-- **Guest** (`role 0`) — anonymous visitors. Only visible when the `anonymous` setting is enabled.
-- **User** (`role 1`) — can browse and manage files.
+- **Guest** (`role 1`) — anonymous visitors. The `guest` user account is created
+  **disabled** by default; enable it in the user list to allow anonymous browsing.
+- **User** (`role 0`) — can browse and manage files.
 - **Admin** (`role 2`) — full access, including the admin panel.
 
 > Browsing never contacts the storage provider. Only an **admin** visiting a cold path triggers a provider fetch to populate the D1 file tree; guests and normal users always read from the cache.
@@ -265,7 +266,7 @@ Two drivers are available:
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/public/settings` | Public settings (includes `anonymous`) |
+| GET | `/api/public/settings` | Public settings (site title, logo, favicon, …) |
 | GET | `/api/public/archive_extensions` | Archive file extensions |
 | GET | `/api/public/offline_download_tools` | Offline download tools (stub) |
 
@@ -281,7 +282,10 @@ Two drivers are available:
 | `favicon` | `/images/logo.png` | Favicon |
 | `max_connections` | `0` | Max connections (0 = unlimited) |
 | `cache_expiration` | `30` | Default cache lifetime (minutes) |
-| `anonymous` | `false` | Allow anonymous browsing. When `false`, visitors must log in. |
+
+> Anonymous browsing is controlled by the **`guest` user account** in the user
+> list — it is created disabled by default. Enable it to allow visitors to
+> browse without logging in.
 
 ---
 

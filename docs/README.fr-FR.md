@@ -20,7 +20,7 @@ Le tout est écrit en TypeScript, fonctionne sur le runtime Workers et stocke l'
 - 🔐 Authentification et autorisation (invité / utilisateur / administrateur)
 - 🛡️ **Authentification à deux facteurs TOTP (2FA)** — compatible Google Authenticator
 - 🔑 Changement de mot de passe et mise à jour du profil
-- 👤 Navigation anonyme (invité) optionnelle, désactivée par défaut
+- 👤 Navigation anonyme (invité) via le compte utilisateur `guest`, désactivée par défaut
 - 🖥️ Panneau d'administration : stockages, réglages, utilisateurs et pilotes
 - 📥 Téléchargement direct (`/d/`) et via proxy (`/p/`), support Range/HEAD
 - 🔄 Cache des liens pré-signés avec déduplication singleflight
@@ -93,8 +93,10 @@ Autres scripts utiles :
 
 ### Rôles
 
-- **Invité** (`role 0`) — visiteurs anonymes. Visible uniquement si le réglage `anonymous` est activé.
-- **Utilisateur** (`role 1`) — peut parcourir et gérer les fichiers.
+- **Invité** (`role 1`) — visiteurs anonymes. Le compte utilisateur `guest` est créé
+  **désactivé** par défaut ; activez-le dans la liste des utilisateurs pour autoriser
+  la navigation anonyme.
+- **Utilisateur** (`role 0`) — peut parcourir et gérer les fichiers.
 - **Administrateur** (`role 2`) — accès complet, y compris le panneau d'administration.
 
 > La navigation ne contacte jamais le fournisseur de stockage. Seul un **administrateur** visitant un chemin à froid déclenche une requête au fournisseur pour remplir l'arborescence D1 ; invités et utilisateurs lisent toujours depuis le cache.
@@ -265,7 +267,7 @@ Exemple `addition` (OneDrive APP) :
 
 | Méthode | Chemin | Description |
 |---|---|---|
-| GET | `/api/public/settings` | Réglages publics (inclut `anonymous`) |
+| GET | `/api/public/settings` | Réglages publics (titre du site, logo, favicon, …) |
 | GET | `/api/public/archive_extensions` | Extensions d'archives |
 | GET | `/api/public/offline_download_tools` | Outils de téléchargement hors-ligne (stub) |
 
@@ -281,7 +283,10 @@ Exemple `addition` (OneDrive APP) :
 | `favicon` | `/images/logo.png` | Favicon |
 | `max_connections` | `0` | Connexions max (0 = illimité) |
 | `cache_expiration` | `30` | Durée de vie du cache (minutes) |
-| `anonymous` | `false` | Autoriser la navigation anonyme. Si `false`, les visiteurs doivent se connecter. |
+
+> La navigation anonyme est contrôlée par le compte **`guest`** dans la liste des
+> utilisateurs — créé désactivé par défaut. Activez-le pour permettre aux visiteurs
+> de parcourir sans se connecter.
 
 ---
 
