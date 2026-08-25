@@ -23,6 +23,7 @@ Le tout est écrit en TypeScript, fonctionne sur le runtime Workers et stocke l'
 - 👤 Navigation anonyme (invité) via le compte utilisateur `guest`, désactivée par défaut
 - 🖥️ Panneau d'administration : stockages, réglages, utilisateurs et pilotes
 - 📥 Téléchargement direct (`/d/`) et via proxy (`/p/`), support Range/HEAD
+- 💻 **WebDAV** (`/dav/`) — montez vos drives cloud en dossier local (Explorateur Windows, Finder macOS, rclone, …)
 - 🔄 Cache des liens pré-signés avec déduplication singleflight
 
 ---
@@ -221,6 +222,13 @@ Exemple `addition` (OneDrive APP) :
 |---|---|---|
 | GET | `/d/<path>` | Redirection 302 vers l'URL signée |
 | GET/HEAD | `/p/<path>` | Diffuser le fichier via le worker (Range supporté) |
+
+### WebDAV
+
+Montez vos drives cloud en dossier local via le protocole WebDAV standard sur `/dav/`. Méthodes supportées :
+`PROPFIND`, `GET`, `HEAD`, `PUT`, `MKCOL`, `DELETE`, `MOVE`, `COPY`, `LOCK`, `UNLOCK`, `OPTIONS`.
+
+Chaque stockage apparaît comme un dossier de premier niveau sous `/dav/` (ex. `/dav/backblaze/...`).
 
 ### Administration — stockages
 

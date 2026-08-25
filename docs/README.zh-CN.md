@@ -23,6 +23,7 @@
 - 👤 通过 `guest` 用户账号提供可选的匿名（访客）浏览，默认关闭
 - 🖥️ 管理面板：存储、设置、用户和驱动管理
 - 📥 直链下载（`/d/`）与代理下载（`/p/`），支持 Range/HEAD
+- 💻 **WebDAV**（`/dav/`）—— 将云端网盘挂载为本地文件夹（Windows 资源管理器、macOS Finder、rclone 等）
 - 🔄 预签名链接缓存与单飞去重
 
 ---
@@ -219,6 +220,28 @@ D1 数据库在本地 `.wrangler/state` 下模拟，schema 和缓存数据重启
 |---|---|---|
 | GET | `/d/<path>` | 302 跳转到签名下载链接 |
 | GET/HEAD | `/p/<path>` | 通过 Worker 流式传输文件（支持 Range） |
+
+### WebDAV
+
+通过标准 WebDAV 协议在 `/dav/` 挂载你的云端网盘为本地文件夹。支持方法：
+`PROPFIND`、`GET`、`HEAD`、`PUT`、`MKCOL`、`DELETE`、`MOVE`、`COPY`、`LOCK`、`UNLOCK`、`OPTIONS`。
+
+**Windows（资源管理器）：**
+1. 右键"此电脑" → **映射网络驱动器**。
+2. 文件夹填 `http://<你的worker>/dav/`。
+3. 勾选"使用其他凭据连接"，输入 OpenList 用户名/密码。
+
+**rclone：**
+```bash
+rclone config
+# type = webdav
+# url  = https://<你的worker>/dav
+# vendor = other
+# user = <openlist用户名>
+# pass = <openlist密码>
+```
+
+每个存储以顶层文件夹形式出现在 `/dav/` 下（如 `/dav/backblaze/...`）。
 
 ### 管理 — 存储
 

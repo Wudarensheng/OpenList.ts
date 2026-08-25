@@ -23,6 +23,7 @@
 - 👤 `guest` 사용자 계정으로 익명(게스트) 탐색 선택 지원, 기본 비활성화
 - 🖥️ 관리자 패널: 스토리지, 설정, 사용자, 드라이버 관리
 - 📥 직접 다운로드(`/d/`) 및 프록시 다운로드(`/p/`), Range/HEAD 지원
+- 💻 **WebDAV**(`/dav/`) — 클라우드 드라이브를 로컬 폴더로 마운트(Windows 탐색기, macOS Finder, rclone 등)
 - 🔄 서명된 링크 캐시 및 singleflight 중복 제거
 
 ---
@@ -219,6 +220,13 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 |---|---|---|
 | GET | `/d/<path>` | 서명된 다운로드 URL로 302 리다이렉트 |
 | GET/HEAD | `/p/<path>` | 워커를 통해 파일 스트리밍(Range 지원) |
+
+### WebDAV
+
+표준 WebDAV 프로토콜로 `/dav/`에 클라우드 드라이브를 로컬 폴더로 마운트할 수 있습니다. 지원 메서드:
+`PROPFIND`, `GET`, `HEAD`, `PUT`, `MKCOL`, `DELETE`, `MOVE`, `COPY`, `LOCK`, `UNLOCK`, `OPTIONS`.
+
+각 스토리지는 `/dav/` 아래 최상위 폴더로 표시됩니다(예: `/dav/backblaze/...`).
 
 ### 관리 — 스토리지
 

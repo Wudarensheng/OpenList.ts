@@ -23,6 +23,7 @@
 - 👤 通過 `guest` 用戶賬號提供可選的匿名（訪客）瀏覽，默認關閉
 - 🖥️ 管理面板：存儲、設置、用戶和驅動管理
 - 📥 直鏈下載（`/d/`）與代理下載（`/p/`），支持 Range/HEAD
+- 💻 **WebDAV**（`/dav/`）—— 將雲端網盤掛載為本地資料夾（Windows 資源管理器、macOS Finder、rclone 等）
 - 🔄 預簽名鏈接緩存與單飛去重
 
 ---
@@ -219,6 +220,13 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 |---|---|---|
 | GET | `/d/<path>` | 302 跳轉到簽名下載鏈接 |
 | GET/HEAD | `/p/<path>` | 通過 Worker 流式傳輸文件（支持 Range） |
+
+### WebDAV
+
+通過標準 WebDAV 協議在 `/dav/` 掛載你的雲端網盤為本地資料夾。支持方法：
+`PROPFIND`、`GET`、`HEAD`、`PUT`、`MKCOL`、`DELETE`、`MOVE`、`COPY`、`LOCK`、`UNLOCK`、`OPTIONS`。
+
+每個存儲以頂層資料夾形式出現在 `/dav/` 下（如 `/dav/backblaze/...`）。
 
 ### 管理 — 存儲
 

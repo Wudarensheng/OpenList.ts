@@ -23,6 +23,7 @@ Everything is TypeScript, runs on the Workers runtime, and stores its file tree 
 - 👤 Optional anonymous (guest) browsing via the `guest` user account, disabled by default
 - 🖥️ Admin panel: storage, settings, users and drivers management
 - 📥 Direct download (`/d/`) and proxied download (`/p/`) with Range/HEAD support
+- 💻 **WebDAV** (`/dav/`) — mount your cloud drives as a local folder (Windows Explorer, macOS Finder, rclone, …)
 - 🔄 Presigned-link caching with singleflight deduplication
 
 ---
@@ -232,6 +233,30 @@ Two drivers are available:
 |---|---|---|
 | GET | `/d/<path>` | 302 redirect to the signed download URL |
 | GET/HEAD | `/p/<path>` | Stream the file through the worker (Range supported) |
+
+### WebDAV
+
+Mount your cloud drives as a local folder via the standard WebDAV protocol at
+`/dav/`. Supported methods: `PROPFIND`, `GET`, `HEAD`, `PUT`, `MKCOL`,
+`DELETE`, `MOVE`, `COPY`, `LOCK`, `UNLOCK`, `OPTIONS`.
+
+**Windows (Explorer):**
+1. Right-click *This PC* → **Map network drive**.
+2. Enter `http://<your-worker>/dav/` as the folder.
+3. Check *Connect using different credentials* and use your OpenList
+   username/password.
+
+**rclone:**
+```bash
+rclone config
+# type = webdav
+# url  = https://<your-worker>/dav
+# vendor = other
+# user = <openlist-username>
+# pass = <openlist-password>
+```
+
+Each storage appears as a top-level folder under `/dav/` (e.g. `/dav/backblaze/...`).
 
 ### Admin — storages
 
