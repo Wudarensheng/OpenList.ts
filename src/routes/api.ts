@@ -1,6 +1,7 @@
 import { Env } from '../types';
 import { handleAuthRequest } from './auth';
 import { handleFsRequest } from './fs';
+import { handleShareRequest } from './share';
 import { handleStorageRequest } from './storage';
 import { handleSettingRequest } from './settings';
 import { handleUserRequest } from './users';
@@ -40,6 +41,11 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
   // Update current user profile (username / password)
   if (path === '/api/me/update' && request.method === 'POST') {
     return handleUpdateCurrentUser(request, env);
+  }
+
+  // Share management
+  if (path.startsWith('/api/share/')) {
+    return handleShareRequest(request, env);
   }
 
   // Me sshkey endpoints

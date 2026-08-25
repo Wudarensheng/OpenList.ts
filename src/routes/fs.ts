@@ -2,6 +2,7 @@ import { Env } from '../types';
 import { getDriverInstance } from '../drivers/registry';
 import { jsonResponse } from '../utils/response';
 import { isAnonymousEnabled } from './api';
+import { parseSharePath, listShare, getShareFile, shareExists } from './share';
 import {
   isCacheValid,
   getCachedFiles as getCachedFilesFromDB,
@@ -51,12 +52,19 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
 
   // POST /api/fs/list
   if (path === '/api/fs/list') {
-    return handleListFiles(request, env, userId, userRole);
+    // Share browsing: a path like /<sid>/... where sid is a valid share id
+    const body = await request.json().catch(() => null) as any;
+    const shareHit = await tryShareList(request, body, env);
+    if (shareHit) return shareHit;
+    return handleListFiles(request, env, userId, userRole, body);
   }
 
   // POST /api/fs/get
   if (path === '/api/fs/get') {
-    return handleGetFile(request, env, userId, userRole);
+    const body = await request.json().catch(() => null) as any;
+    const shareHit = await tryShareGet(request, body, env);
+    if (shareHit) return shareHit;
+    return handleGetFile(request, env, userId, userRole, body);
   }
 
   // POST /api/fs/dirs
@@ -119,6 +127,63 @@ export async function handleFsRequest(request: Request, env: Env): Promise<Respo
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
+// If the requested path points into a share (/<sid>/...), serve it via the
+// share logic. Returns a Response when handled, null otherwise.
+async function tryShareList(request: Request, body: any, env: Env): Promise<Response | null> {
+  const path = body?.path || '/';
+  const parsed = parseSharePath(path);
+  if (!parsed) return null;
+
+  // The path is share-shaped. If the share id exists but the share is invalid
+  // (wrong password, disabled, expired), report a proper error instead of
+  // falling through to normal storage resolution.
+  if (await shareExists(env, parsed.sid)) {
+    const pwd = body?.password;
+    const result = await listShare(env, parsed.sid, parsed.sharePath, pwd);
+    if (!result) {
+      return jsonResponse({ code: 403, message: 'Share is invalid or password is required' }, 403);
+    }
+    return jsonResponse({
+      code: 200,
+      message: 'success',
+      data: {
+        content: result.content,
+        total: result.content.length,
+        readme: result.readme,
+        header: result.header,
+        write: false,
+        provider: 'unknown',
+      }
+    });
+  }
+
+  return null;
+}
+
+async function tryShareGet(request: Request, body: any, env: Env): Promise<Response | null> {
+  const path = body?.path || '/';
+  const parsed = parseSharePath(path);
+  if (!parsed) return null;
+
+  if (await shareExists(env, parsed.sid)) {
+    const pwd = body?.password;
+    const file = await getShareFile(env, parsed.sid, parsed.sharePath, pwd);
+    if (!file) {
+      return jsonResponse({ code: 403, message: 'Share is invalid or password is required' }, 403);
+    }
+    return jsonResponse({
+      code: 200,
+      message: 'success',
+      data: {
+        ...file,
+        related: [],
+      }
+    });
+  }
+
+  return null;
+}
+
 
 
 // Get storage that matches the given path
@@ -166,9 +231,9 @@ async function getDriver(storage: any): Promise<any> {
   return getDriverInstance(storage.driver, addition);
 }
 
-async function handleListFiles(request: Request, env: Env, userId: number, userRole: number): Promise<Response> {
+async function handleListFiles(request: Request, env: Env, userId: number, userRole: number, preBody?: any): Promise<Response> {
   try {
-    const body = await request.json() as any;
+    const body = preBody || await request.json() as any;
     const path = body.path || '/';
     const page = body.page || 1;
     const perPage = body.per_page || 0; // 0 = no pagination
@@ -400,9 +465,9 @@ async function handleListFiles(request: Request, env: Env, userId: number, userR
   }
 }
 
-async function handleGetFile(request: Request, env: Env, userId: number, userRole: number): Promise<Response> {
+async function handleGetFile(request: Request, env: Env, userId: number, userRole: number, preBody?: any): Promise<Response> {
   try {
-    const body = await request.json() as any;
+    const body = preBody || await request.json() as any;
     const path = body.path;
 
     if (!path) {

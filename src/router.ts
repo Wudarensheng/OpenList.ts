@@ -2,6 +2,7 @@ import { Env } from './types';
 import { handleApiRequest } from './routes/api';
 import { handleStaticFile } from './routes/static';
 import { handleDownloadRequest } from './routes/download';
+import { handleShareDownload } from './routes/share';
 
 export async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
@@ -31,6 +32,11 @@ export async function handleRequest(request: Request, env: Env, ctx: ExecutionCo
   // Handle direct link / proxy download routes (/d/<path>, /p/<path>)
   if (path.startsWith('/d/') || path.startsWith('/p/')) {
     return handleDownloadRequest(request, env);
+  }
+
+  // Handle share download routes (/sd/<sid>/<path>)
+  if (path.startsWith('/sd/')) {
+    return handleShareDownload(request, env);
   }
 
   // Handle static files

@@ -102,6 +102,26 @@ export async function initializeDatabase(env: Env): Promise<void> {
       )
     `).run();
 
+    await env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS shares (
+        id TEXT PRIMARY KEY,
+        files TEXT NOT NULL DEFAULT '[]',
+        expires TEXT,
+        pwd TEXT DEFAULT '',
+        accessed INTEGER DEFAULT 0,
+        max_accessed INTEGER DEFAULT 0,
+        creator_id INTEGER DEFAULT 0,
+        disabled INTEGER DEFAULT 0,
+        remark TEXT DEFAULT '',
+        readme TEXT DEFAULT '',
+        header TEXT DEFAULT '',
+        order_by TEXT DEFAULT 'name',
+        order_direction TEXT DEFAULT 'asc',
+        extract_folder TEXT DEFAULT 'front',
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `).run();
+
     // Migration: add parent_path column to existing files table if missing
     try {
       await env.DB.prepare(`ALTER TABLE files ADD COLUMN parent_path TEXT NOT NULL DEFAULT ''`).run();

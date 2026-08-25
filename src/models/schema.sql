@@ -92,6 +92,25 @@ CREATE TABLE IF NOT EXISTS request_locks (
   expires_at TEXT NOT NULL
 );
 
+-- File shares
+CREATE TABLE IF NOT EXISTS shares (
+  id TEXT PRIMARY KEY,
+  files TEXT NOT NULL DEFAULT '[]',      -- JSON array of shared paths
+  expires TEXT,
+  pwd TEXT DEFAULT '',
+  accessed INTEGER DEFAULT 0,
+  max_accessed INTEGER DEFAULT 0,
+  creator_id INTEGER DEFAULT 0,
+  disabled INTEGER DEFAULT 0,
+  remark TEXT DEFAULT '',
+  readme TEXT DEFAULT '',
+  header TEXT DEFAULT '',
+  order_by TEXT DEFAULT 'name',
+  order_direction TEXT DEFAULT 'asc',
+  extract_folder TEXT DEFAULT 'front',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 CREATE INDEX IF NOT EXISTS idx_files_parent_path_storage ON files(parent_path, storage_id);
