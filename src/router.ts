@@ -3,10 +3,16 @@ import { handleApiRequest } from './routes/api';
 import { handleStaticFile } from './routes/static';
 import { handleDownloadRequest } from './routes/download';
 import { handleShareDownload } from './routes/share';
+import { handleWebDavRequest } from './routes/webdav';
 
 export async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
+
+  // Handle WebDAV (must come before the generic OPTIONS preflight)
+  if (path.startsWith('/dav')) {
+    return handleWebDavRequest(request, env);
+  }
 
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
