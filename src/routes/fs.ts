@@ -905,8 +905,21 @@ async function handleCopy(request: Request, env: Env): Promise<Response> {
 async function handleUpload(request: Request, env: Env): Promise<Response> {
   try {
     const url = new URL(request.url);
-    const path = url.searchParams.get('path') || '/';
-    const name = url.searchParams.get('name') || 'file';
+    // The frontend sends the FULL target file path (directory + filename) in
+    // the "File-Path" header, e.g. "/backblaze/photo.jpg". Fall back to
+    // ?path= + ?name= for API compatibility.
+    let path: string;
+    let name: string;
+    const filePathHeader = request.headers.get('File-Path');
+    if (filePathHeader) {
+      const full = decodeURIComponent(filePathHeader);
+      const idx = full.lastIndexOf('/');
+      path = idx <= 0 ? '/' : full.slice(0, idx);
+      name = full.slice(idx + 1) || 'file';
+    } else {
+      path = url.searchParams.get('path') || '/';
+      name = url.searchParams.get('name') || 'file';
+    }
 
     const storage = await getStorageForPath(path, env);
     if (!storage) {
@@ -936,7 +949,20 @@ async function handleFormUpload(request: Request, env: Env): Promise<Response> {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as unknown as File;
-    const path = formData.get('path') as string || '/';
+    // The frontend sends the FULL target file path in the "File-Path" header.
+    // Fall back to the form's "path" field for API compatibility.
+    let path: string;
+    let fileName: string;
+    const filePathHeader = request.headers.get('File-Path');
+    if (filePathHeader) {
+      const full = decodeURIComponent(filePathHeader);
+      const idx = full.lastIndexOf('/');
+      path = idx <= 0 ? '/' : full.slice(0, idx);
+      fileName = full.slice(idx + 1) || (file?.name || 'file');
+    } else {
+      path = formData.get('path') as string || '/';
+      fileName = file?.name || 'file';
+    }
 
     if (!file) {
       return jsonResponse({ code: 400, message: 'File is required' }, 400);
@@ -948,7 +974,7 @@ async function handleFormUpload(request: Request, env: Env): Promise<Response> {
     }
 
     const driver = await getDriver(storage);
-    const fullPath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
+    const fullPath = path === '/' ? `/${fileName}` : `${path}/${fileName}`;
     const relativePath = getRelativePath(fullPath, storage.mount_path);
     const fileBuffer = await file.arrayBuffer();
 
