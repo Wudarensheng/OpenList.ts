@@ -474,19 +474,48 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
       return jsonResponse({ code: 400, message: 'Path is required' }, 400);
     }
 
-    const storage = await getStorageForPath(path, env);
-    if (!storage) {
-      return jsonResponse({ code: 404, message: 'Storage not found' }, 404);
-    }
-
     // The root path always exists as a directory. The frontend calls
-    // /api/fs/get on "/" when loading the root, so never 404 it.
+    // /api/fs/get on "/" when loading the root, so never 404 it - even when
+    // no storage is mounted at "/" (e.g. a storage mounted at /Backblaze).
     if (path === '/') {
+      const rootStorage = await getStorageForPath('/', env);
       return jsonResponse({
         code: 200,
         message: 'success',
         data: {
           name: '/',
+          size: 0,
+          is_dir: true,
+          modified: new Date().toISOString(),
+          created: new Date().toISOString(),
+          sign: '',
+          thumb: '',
+          type: 1, // FOLDER
+          hashinfo: '',
+          hash_info: {},
+          raw_url: '',
+          readme: '',
+          header: '',
+          provider: rootStorage ? rootStorage.driver : 'local',
+          related: []
+        }
+      });
+    }
+
+    const storage = await getStorageForPath(path, env);
+    if (!storage) {
+      return jsonResponse({ code: 404, message: 'Storage not found' }, 404);
+    }
+
+    // The mount root of a storage (e.g. /Backblaze) is always a directory,
+    // even if the files table has no cached entry for it yet.
+    const mountPath = (storage as any).mount_path;
+    if (mountPath && mountPath !== '/' && path === mountPath) {
+      return jsonResponse({
+        code: 200,
+        message: 'success',
+        data: {
+          name: mountPath.split('/').pop() || mountPath,
           size: 0,
           is_dir: true,
           modified: new Date().toISOString(),
