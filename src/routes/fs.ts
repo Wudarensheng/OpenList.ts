@@ -447,8 +447,12 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
     const cachedFile = await getCachedFileFromDB(storage.id, path, env);
     if (cachedFile) {
       let linkUrl = '';
-      const cachedLinkResult = await getCachedLink(storage.id, path, env);
-      if (cachedLinkResult) linkUrl = cachedLinkResult.url;
+      // Directories have no download URL.
+      if (cachedFile.is_folder !== 1) {
+        const cachedLinkResult = await getCachedLink(storage.id, path, env);
+        if (cachedLinkResult) linkUrl = cachedLinkResult.url;
+        else linkUrl = buildRawUrl(path);
+      }
 
       return jsonResponse({
         code: 200,
@@ -500,8 +504,11 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
       const retryFile = await getCachedFileFromDB(storage.id, path, env);
       if (retryFile) {
         let linkUrl = '';
-        const cachedLinkResult = await getCachedLink(storage.id, path, env);
-        if (cachedLinkResult) linkUrl = cachedLinkResult.url;
+        if (retryFile.is_folder !== 1) {
+          const cachedLinkResult = await getCachedLink(storage.id, path, env);
+          if (cachedLinkResult) linkUrl = cachedLinkResult.url;
+          else linkUrl = buildRawUrl(path);
+        }
 
         return jsonResponse({
           code: 200,
@@ -561,7 +568,7 @@ async function handleGetFile(request: Request, env: Env, userId: number, userRol
           type: file.is_dir ? 1 : getFileType(file.name),
           hashinfo: file.hash_info || '',
           hash_info: {},
-          raw_url: '',
+          raw_url: file.is_dir ? '' : buildRawUrl(path),
           readme: '',
           header: '',
           provider: storage.driver,
@@ -862,6 +869,15 @@ async function handleFormUpload(request: Request, env: Env): Promise<Response> {
     console.error('Form upload error:', error);
     return jsonResponse({ code: 500, message: error.message || 'Internal Server Error' }, 500);
   }
+}
+
+// Build a frontend-facing raw download URL for a file path.
+// The frontend uses raw_url for its download/preview links; returning a
+// provider URL here would require a storage request on every browse. Instead
+// return the /d/ proxy route, which resolves the signed link lazily on
+// download - so browsing stays provider-free.
+function buildRawUrl(path: string): string {
+  return `/d/${path.replace(/^\//, '')}`;
 }
 
 function getFileType(name: string): number {
