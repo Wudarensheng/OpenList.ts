@@ -1,5 +1,6 @@
 import { Env, User } from '../types';
 import { jsonResponse } from '../utils/response';
+import { hashPasswordForStorage, getAuthUser } from '../utils/auth';
 
 export async function handleUserRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -23,6 +24,14 @@ export async function handleUserRequest(request: Request, env: Env): Promise<Res
 
   if (path === '/api/admin/user/delete' && request.method === 'POST') {
     return handleDeleteUser(request, env);
+  }
+
+  if (path === '/api/admin/user/cancel_2fa' && request.method === 'POST') {
+    return handleCancel2FA(request, env);
+  }
+
+  if (path === '/api/admin/user/del_cache' && request.method === 'POST') {
+    return handleDeleteUserCache(request, env);
   }
 
   if (path === '/api/admin/user/sshkey/list' && request.method === 'GET') {
@@ -106,6 +115,11 @@ async function handleCreateUser(request: Request, env: Env): Promise<Response> {
       return jsonResponse({ code: 400, message: 'Username and password are required' }, 400);
     }
 
+    // The admin and guest accounts cannot be recreated via the API.
+    if (body.username === 'guest' || body.role === 2) {
+      return jsonResponse({ code: 400, message: 'admin or guest user can not be created' }, 400);
+    }
+
     const existing = await env.DB.prepare(
       'SELECT id FROM users WHERE username = ?'
     ).bind(body.username).first();
@@ -114,15 +128,22 @@ async function handleCreateUser(request: Request, env: Env): Promise<Response> {
       return jsonResponse({ code: 400, message: 'Username already exists' }, 400);
     }
 
+    const hashed = await hashPasswordForStorage(body.password);
+    const salt = hashed.split(':')[0];
+    const hash = hashed.split(':')[1];
+
     const result = await env.DB.prepare(
-      'INSERT INTO users (username, password, role, disabled, base_path, permission) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO users (username, password, salt, role, disabled, base_path, permission, sso_id, allow_ldap) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).bind(
       body.username,
-      body.password,
+      `${salt}:${hash}`,
+      salt,
       body.role ?? 0,
       body.disabled ? 1 : 0,
       body.base_path || '/',
-      body.permission ?? 0
+      body.permission ?? 0,
+      body.sso_id || '',
+      body.allow_ldap ? 1 : 0
     ).run();
 
     return jsonResponse({
@@ -144,12 +165,27 @@ async function handleUpdateUser(request: Request, env: Env): Promise<Response> {
       return jsonResponse({ code: 400, message: 'User ID is required' }, 400);
     }
 
+    // Resolve the acting admin so we can avoid invalidating the admin's own
+    // session when they edit their own password.
+    const actingUser = await getAuthUser(request, env);
+    const isSelf = actingUser && Number(actingUser.id) === Number(body.id);
+
     const existing = await env.DB.prepare(
       'SELECT id FROM users WHERE id = ?'
     ).bind(body.id).first();
 
     if (!existing) {
       return jsonResponse({ code: 404, message: 'User not found' }, 404);
+    }
+
+    // Protect the main administrator account.
+    if (parseInt(body.id) === 1) {
+      if (body.disabled) {
+        return jsonResponse({ code: 400, message: 'Cannot disable the main administrator' }, 400);
+      }
+      if (body.role !== undefined && body.role !== 2) {
+        return jsonResponse({ code: 400, message: 'Cannot change the main administrator role' }, 400);
+      }
     }
 
     if (body.username) {
@@ -170,8 +206,19 @@ async function handleUpdateUser(request: Request, env: Env): Promise<Response> {
       values.push(body.username);
     }
     if (body.password) {
-      updates.push('password = ?');
-      values.push(body.password);
+      const hashed = await hashPasswordForStorage(body.password);
+      const salt = hashed.split(':')[0];
+      const hash = hashed.split(':')[1];
+      // Bump pwd_ts only when changing ANOTHER user's password (invalidates
+      // that user's existing sessions). Editing your own password keeps the
+      // current session alive to avoid the frontend immediately getting 401.
+      if (isSelf) {
+        updates.push('password = ?', 'salt = ?');
+        values.push(`${salt}:${hash}`, salt);
+      } else {
+        updates.push('password = ?', 'salt = ?', "pwd_ts = CAST(strftime('%s','now') AS INTEGER)");
+        values.push(`${salt}:${hash}`, salt);
+      }
     }
     if (body.role !== undefined) {
       updates.push('role = ?');
@@ -188,6 +235,14 @@ async function handleUpdateUser(request: Request, env: Env): Promise<Response> {
     if (body.permission !== undefined) {
       updates.push('permission = ?');
       values.push(body.permission);
+    }
+    if (body.sso_id !== undefined) {
+      updates.push('sso_id = ?');
+      values.push(body.sso_id || '');
+    }
+    if (body.allow_ldap !== undefined) {
+      updates.push('allow_ldap = ?');
+      values.push(body.allow_ldap ? 1 : 0);
     }
 
     if (updates.length === 0) {
@@ -232,6 +287,53 @@ async function handleDeleteUser(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ code: 200, message: 'success' });
   } catch (error) {
     console.error('Delete user error:', error);
+    return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
+  }
+}
+
+// POST /api/admin/user/cancel_2fa - clear a user's 2FA secret (admin)
+async function handleCancel2FA(request: Request, env: Env): Promise<Response> {
+  try {
+    const url = new URL(request.url);
+    let id = url.searchParams.get('id');
+    if (!id) {
+      try {
+        const body = await request.json() as any;
+        id = body.id;
+      } catch {}
+    }
+    if (!id) {
+      return jsonResponse({ code: 400, message: 'User ID is required' }, 400);
+    }
+    const user = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(id).first();
+    if (!user) {
+      return jsonResponse({ code: 404, message: 'User not found' }, 404);
+    }
+    await env.DB.prepare('UPDATE users SET otp_secret = NULL WHERE id = ?').bind(id).run();
+    return jsonResponse({ code: 200, message: 'success' });
+  } catch (error) {
+    console.error('Cancel 2FA error:', error);
+    return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
+  }
+}
+
+// POST /api/admin/user/del_cache - clear a user's cached data (admin)
+async function handleDeleteUserCache(request: Request, env: Env): Promise<Response> {
+  try {
+    const url = new URL(request.url);
+    let id = url.searchParams.get('id');
+    if (!id) {
+      try {
+        const body = await request.json() as any;
+        id = body.id;
+      } catch {}
+    }
+    if (!id) {
+      return jsonResponse({ code: 400, message: 'User ID is required' }, 400);
+    }
+    return jsonResponse({ code: 200, message: 'success' });
+  } catch (error) {
+    console.error('Delete user cache error:', error);
     return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
   }
 }

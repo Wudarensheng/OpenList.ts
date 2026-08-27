@@ -5,12 +5,15 @@ CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
+  salt TEXT,
   role INTEGER DEFAULT 0, -- 0 = guest, 1 = user, 2 = admin
   disabled INTEGER DEFAULT 0,
   sso_id TEXT,
+  allow_ldap INTEGER DEFAULT 0,
   otp_secret TEXT,
   base_path TEXT DEFAULT '/',
   permission INTEGER DEFAULT 0,
+  pwd_ts INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -108,6 +111,60 @@ CREATE TABLE IF NOT EXISTS shares (
   order_by TEXT DEFAULT 'name',
   order_direction TEXT DEFAULT 'asc',
   extract_folder TEXT DEFAULT 'front',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Login rate-limit tracking
+CREATE TABLE IF NOT EXISTS login_attempts (
+  ip TEXT PRIMARY KEY,
+  count INTEGER DEFAULT 0,
+  expires_at TEXT
+);
+
+-- Logged-out token blacklist
+CREATE TABLE IF NOT EXISTS invalid_tokens (
+  token_hash TEXT PRIMARY KEY,
+  expires_at TEXT NOT NULL
+);
+
+-- Long-running tasks (offline download, transfer, archive, index, ...)
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  state INTEGER DEFAULT 0,
+  status TEXT DEFAULT '',
+  progress REAL DEFAULT 0,
+  error TEXT DEFAULT '',
+  extra TEXT DEFAULT '{}',
+  creator_id INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Per-path metadata (readme/header/password/hide/access control)
+CREATE TABLE IF NOT EXISTS metas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  path TEXT NOT NULL UNIQUE,
+  read_users TEXT DEFAULT '[]',
+  read_users_sub INTEGER DEFAULT 0,
+  write_users TEXT DEFAULT '[]',
+  write_users_sub INTEGER DEFAULT 0,
+  password TEXT DEFAULT '',
+  p_sub INTEGER DEFAULT 0,
+  write INTEGER DEFAULT 0,
+  w_sub INTEGER DEFAULT 0,
+  hide TEXT DEFAULT '',
+  h_sub INTEGER DEFAULT 0,
+  readme TEXT DEFAULT '',
+  r_sub INTEGER DEFAULT 0,
+  header TEXT DEFAULT '',
+  header_sub INTEGER DEFAULT 0
+);
+
+-- SSO login state (CSRF) store
+CREATE TABLE IF NOT EXISTS sso_states (
+  state TEXT PRIMARY KEY,
   created_at TEXT DEFAULT (datetime('now'))
 );
 

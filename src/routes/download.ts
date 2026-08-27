@@ -9,6 +9,8 @@ import { Env } from '../types';
 import { getStorageForPath, getRelativePath } from './fs';
 import { getDriverInstance } from '../drivers/registry';
 import { getCachedLink, cacheLink, acquireLock, releaseLock } from '../cache';
+import { verifySign, isSignAll } from '../utils/sign';
+import { extractArchiveEntry } from '../utils/archive';
 
 export async function handleDownloadRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -24,7 +26,106 @@ export async function handleDownloadRequest(request: Request, env: Env): Promise
     return handleProxy(rawPath, request, env);
   }
 
+  if (path.startsWith('/ad/') || path.startsWith('/ap/') || path.startsWith('/ae/')) {
+    const rawPath = decodePath(path.substring(4));
+    return handleArchiveDownload(rawPath, request, env);
+  }
+
   return new Response('Not Found', { status: 404 });
+}
+
+// /ad/<path>?inner=<inner>&pass=<pass> - stream a single file out of an archive.
+async function handleArchiveDownload(rawPath: string, request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const inner = url.searchParams.get('inner') || '/';
+
+  const storage = await getStorageForPath(rawPath, env);
+  if (!storage) return new Response('Not Found', { status: 404 });
+
+  // Sign verification (same policy as /d/ /p/).
+  const signAll = await isSignAll(env);
+  if (storage.enable_sign || signAll) {
+    const signature = url.searchParams.get('sign') || '';
+    if (!signature || !(await verifySign(rawPath, signature, env))) {
+      return new Response('Invalid or expired sign', { status: 403 });
+    }
+  }
+
+  const isHead = request.method === 'HEAD';
+  try {
+    const data = await extractArchiveEntry(rawPath, inner, env);
+    const filename = inner.split('/').filter(Boolean).pop() || 'file';
+    const type = url.searchParams.get('type');
+
+    const outHeaders = new Headers();
+    outHeaders.set('Content-Type', mimeFromName(filename));
+    outHeaders.set('Content-Length', String(data.byteLength));
+    outHeaders.set('Accept-Ranges', 'bytes');
+    outHeaders.set('Referrer-Policy', 'no-referrer');
+    outHeaders.set('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
+
+    const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_');
+    const disposition = type === 'preview'
+      ? 'inline'
+      : `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+    outHeaders.set('Content-Disposition', disposition);
+
+    // Basic Range support on the extracted bytes.
+    const range = request.headers.get('Range');
+    let status = 200;
+    let body: ArrayBuffer | null = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+    if (range) {
+      const m = range.match(/bytes=(\d*)-(\d*)/);
+      if (m) {
+        const total = data.byteLength;
+        let start = m[1] ? parseInt(m[1], 10) : 0;
+        let end = m[2] ? parseInt(m[2], 10) : total - 1;
+        if (isNaN(start)) start = 0;
+        if (isNaN(end)) end = total - 1;
+        if (start > end || start >= total) {
+          return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${total}` } });
+        }
+        end = Math.min(end, total - 1);
+        const slice = data.slice(start, end + 1);
+        body = slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength) as ArrayBuffer;
+        outHeaders.set('Content-Range', `bytes ${start}-${end}/${total}`);
+        outHeaders.set('Content-Length', String(body.byteLength));
+        status = 206;
+      }
+    }
+
+    return new Response(isHead ? null : body, { status, headers: outHeaders });
+  } catch (e: any) {
+    const msg = String(e?.message || '');
+    if (msg.includes('not found') || msg.includes('Not found')) {
+      return new Response('Not Found', { status: 404 });
+    }
+    console.error('Archive download error:', e);
+    return new Response(e?.message || 'Internal Server Error', { status: 500 });
+  }
+}
+
+function mimeFromName(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  const map: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+    webp: 'image/webp', svg: 'image/svg+xml', mp3: 'audio/mpeg', wav: 'audio/wav',
+    mp4: 'video/mp4', webm: 'video/webm', pdf: 'application/pdf',
+    txt: 'text/plain', md: 'text/markdown', json: 'application/json',
+    zip: 'application/zip', html: 'text/html', css: 'text/css', js: 'application/javascript',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+// Verify the ?sign= parameter when the storage requires signed links.
+async function verifyRequiredSign(rawPath: string, request: Request, storage: any, env: Env): Promise<boolean> {
+  const signAll = await isSignAll(env);
+  const signEnabled = !!(storage.enable_sign || signAll);
+  if (!signEnabled) return true;
+  const url = new URL(request.url);
+  const signature = url.searchParams.get('sign') || '';
+  if (!signature) return false;
+  return verifySign(rawPath, signature, env);
 }
 
 function decodePath(p: string): string {
@@ -78,6 +179,10 @@ async function handleDirect(rawPath: string, request: Request, env: Env): Promis
   const storage = await getStorage(rawPath, env);
   if (!storage) return new Response('Not Found', { status: 404 });
 
+  if (!await verifyRequiredSign(rawPath, request, storage, env)) {
+    return new Response('Invalid or expired sign', { status: 403 });
+  }
+
   // If the storage is configured to proxy, stream through this worker
   if (storage.web_proxy) {
     return handleProxy(rawPath, request, env);
@@ -104,6 +209,10 @@ async function handleDirect(rawPath: string, request: Request, env: Env): Promis
 async function handleProxy(rawPath: string, request: Request, env: Env): Promise<Response> {
   const storage = await getStorage(rawPath, env);
   if (!storage) return new Response('Not Found', { status: 404 });
+
+  if (!await verifyRequiredSign(rawPath, request, storage, env)) {
+    return new Response('Invalid or expired sign', { status: 403 });
+  }
 
   const link = await getLink(storage, rawPath, env);
 
@@ -133,17 +242,9 @@ async function proxyLink(link: { url: string; header?: Record<string, string> },
       headHeaders['Range'] = 'bytes=0-0';
       syntheticRange = true;
     }
-    upstream = await fetch(link.url, {
-      method: 'GET',
-      headers: headHeaders,
-      redirect: 'follow',
-    });
+    upstream = await fetchFollowingRedirects(link.url, headHeaders);
   } else {
-    upstream = await fetch(link.url, {
-      method: 'GET',
-      headers,
-      redirect: 'follow',
-    });
+    upstream = await fetchFollowingRedirects(link.url, headers);
   }
 
   const filename = rawPath.split('/').pop() || 'file';
@@ -183,4 +284,33 @@ async function proxyLink(link: { url: string; header?: Record<string, string> },
     status = 200;
   }
   return new Response(isHead ? null : upstream.body, { status, headers: outHeaders });
+}
+
+// Fetch an upstream URL following redirects manually. Sensitive headers
+// (Authorization, Cookie) are stripped when a redirect crosses to a different
+// origin, otherwise a WebDAV/Basic-auth link that 302s to a presigned storage
+// URL would leak the credentials to the target host.
+async function fetchFollowingRedirects(url: string, headers: Record<string, string>): Promise<Response> {
+  let current = url;
+  let currentHeaders = headers;
+  let upstream = await fetch(current, { method: 'GET', headers: currentHeaders, redirect: 'manual' });
+
+  let hops = 0;
+  const redirectStatus = [301, 302, 303, 307, 308];
+  while (redirectStatus.includes(upstream.status) && hops < 5) {
+    const loc = upstream.headers.get('location');
+    if (!loc) break;
+    const next = new URL(loc, current);
+    if (next.origin !== new URL(current).origin) {
+      const filtered: Record<string, string> = {};
+      for (const [k, v] of Object.entries(currentHeaders)) {
+        if (!/^authorization$/i.test(k) && !/^cookie$/i.test(k)) filtered[k] = v;
+      }
+      currentHeaders = filtered;
+    }
+    current = next.toString();
+    upstream = await fetch(current, { method: 'GET', headers: currentHeaders, redirect: 'manual' });
+    hops++;
+  }
+  return upstream;
 }

@@ -14,6 +14,7 @@ import { jsonResponse } from '../utils/response';
 import { getStorageForPath, getRelativePath } from './fs';
 import { getDriverInstance } from '../drivers/registry';
 import { getCachedLink, cacheLink, acquireLock, releaseLock } from '../cache';
+import { getAuthUser, can, PERM } from '../utils/auth';
 
 // Random share ID generation (8 chars, grown on collision)
 const ID_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -183,22 +184,12 @@ export async function handleShareRequest(request: Request, env: Env): Promise<Re
   const method = request.method;
 
   // Require a logged-in user for management operations
-  const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-  let user: any = null;
-  if (token) {
-    try {
-      const payload = JSON.parse(atob(token));
-      if (payload.exp >= Date.now()) {
-        user = await env.DB.prepare(
-          'SELECT * FROM users WHERE id = ? AND disabled = 0'
-        ).bind(payload.userId).first();
-      }
-    } catch {
-      // ignore
-    }
-  }
+  const user = await getAuthUser(request, env);
   if (!user) {
     return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+  }
+  if (!can(user, PERM.SHARE)) {
+    return jsonResponse({ code: 403, message: 'Permission denied' }, 403);
   }
 
   if (path === '/api/share/list' && method === 'GET') {
@@ -785,9 +776,9 @@ async function proxyShareLink(link: { url: string; header?: Record<string, strin
       hh['Range'] = 'bytes=0-0';
       syntheticRange = true;
     }
-    upstream = await fetch(link.url, { method: 'GET', headers: hh, redirect: 'follow' });
+    upstream = await fetchFollowingRedirects(link.url, hh);
   } else {
-    upstream = await fetch(link.url, { method: 'GET', headers, redirect: 'follow' });
+    upstream = await fetchFollowingRedirects(link.url, headers);
   }
 
   const filename = realPath.split('/').pop() || 'file';
@@ -816,4 +807,31 @@ async function proxyShareLink(link: { url: string; header?: Record<string, strin
   let status = upstream.status === 206 ? 206 : upstream.ok ? 200 : upstream.status;
   if (isHead && syntheticRange && status === 206) status = 200;
   return new Response(isHead ? null : upstream.body, { status, headers: outHeaders });
+}
+
+// Follow redirects manually, stripping Authorization/Cookie on cross-origin
+// hops (e.g. a WebDAV/Basic-auth link that 302s to a presigned storage URL).
+async function fetchFollowingRedirects(url: string, headers: Record<string, string>): Promise<Response> {
+  let current = url;
+  let currentHeaders = headers;
+  let upstream = await fetch(current, { method: 'GET', headers: currentHeaders, redirect: 'manual' });
+
+  let hops = 0;
+  const redirectStatus = [301, 302, 303, 307, 308];
+  while (redirectStatus.includes(upstream.status) && hops < 5) {
+    const loc = upstream.headers.get('location');
+    if (!loc) break;
+    const next = new URL(loc, current);
+    if (next.origin !== new URL(current).origin) {
+      const filtered: Record<string, string> = {};
+      for (const [k, v] of Object.entries(currentHeaders)) {
+        if (!/^authorization$/i.test(k) && !/^cookie$/i.test(k)) filtered[k] = v;
+      }
+      currentHeaders = filtered;
+    }
+    current = next.toString();
+    upstream = await fetch(current, { method: 'GET', headers: currentHeaders, redirect: 'manual' });
+    hops++;
+  }
+  return upstream;
 }

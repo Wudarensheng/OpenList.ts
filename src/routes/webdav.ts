@@ -14,6 +14,7 @@ import { Env } from '../types';
 import { getStorageForPath, getRelativePath } from './fs';
 import { getDriverInstance } from '../drivers/registry';
 import { getCachedLink, cacheLink, acquireLock, releaseLock } from '../cache';
+import { verifyPassword } from '../utils/auth';
 
 const NS_DAV = 'DAV:';
 const NS_MICROSOFT = 'urn:schemas-microsoft-com:';
@@ -71,22 +72,15 @@ async function authenticate(request: Request, env: Env): Promise<any | null> {
     'SELECT * FROM users WHERE username = ? AND disabled = 0'
   ).bind(creds.username).first();
   if (!user) return null;
-  // Compare plaintext password (mirrors handleLogin's plaintext comparison).
-  if ((user as any).password !== creds.password) {
-    // Also try the sha256 form used by some clients
-    const alistSalt = 'https://github.com/alist-org/alist';
-    const sha = await sha256Hex(`${(user as any).password}-${alistSalt}`);
-    if (creds.password !== sha && creds.password !== (user as any).password) {
+  // WebDAV clients send the raw password in Basic auth.
+  if (!(await verifyPassword((user as any).password, { raw: creds.password }))) {
+    // Some clients hash the password client-side first.
+    const staticValue = creds.password;
+    if (!(await verifyPassword((user as any).password, { staticHashValue: staticValue }))) {
       return null;
     }
   }
   return user;
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 // Resolve a /dav/<path> URL path to { storage, realPath }.
@@ -396,8 +390,10 @@ async function getDriverLink(storage: any, realPath: string, env: Env): Promise<
     try {
       const addition = JSON.parse(storage.addition);
       const driver = await getDriverInstance(storage.driver, addition);
-      const relativePath = getRelativePath(realPath, storage.mount_path);
-      const link = await driver.link(relativePath, addition);
+      // realPath is already relative to the storage mount (resolvePath did the
+      // mount-strip); passing it through getRelativePath again would corrupt
+      // the path.
+      const link = await driver.link(realPath, addition);
       const cacheExpiration = storage.cache_expiration || 30;
       await cacheLink(storage.id, realPath, link, cacheExpiration * 60, env);
       return link;
@@ -412,8 +408,7 @@ async function getDriverLink(storage: any, realPath: string, env: Env): Promise<
 
   const addition = JSON.parse(storage.addition);
   const driver = await getDriverInstance(storage.driver, addition);
-  const relativePath = getRelativePath(realPath, storage.mount_path);
-  return driver.link(relativePath, addition);
+  return driver.link(realPath, addition);
 }
 
 // ---------------------------------------------------------------- PUT

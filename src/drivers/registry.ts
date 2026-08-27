@@ -76,6 +76,8 @@ async function ensureDrivers(): Promise<void> {
     pikpakMod,
     dropboxMod,
     cloud189Mod,
+    webdavMod,
+    googleDriveMod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -84,6 +86,8 @@ async function ensureDrivers(): Promise<void> {
     import('./pikpak'),
     import('./dropbox'),
     import('./cloud189'),
+    import('./webdav'),
+    import('./google_drive'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -94,6 +98,8 @@ async function ensureDrivers(): Promise<void> {
   if (pikpakMod.pikpakConfig) registerDriver(pikpakMod.PikPakDriver, pikpakMod.pikpakConfig, pikpakMod.pikpakAdditional);
   if (dropboxMod.dropboxConfig) registerDriver(dropboxMod.DropboxDriver, dropboxMod.dropboxConfig, dropboxMod.dropboxAdditional);
   if (cloud189Mod.cloud189Config) registerDriver(cloud189Mod.Cloud189Driver, cloud189Mod.cloud189Config, cloud189Mod.cloud189Additional);
+  if (webdavMod.webdavConfig) registerDriver(webdavMod.WebDavDriver, webdavMod.webdavConfig, webdavMod.webdavAdditional);
+  if (googleDriveMod.googleDriveConfig) registerDriver(googleDriveMod.GoogleDriveDriver, googleDriveMod.googleDriveConfig, googleDriveMod.googleDriveAdditional);
 }
 
 /**

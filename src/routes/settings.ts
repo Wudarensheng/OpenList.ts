@@ -26,7 +26,19 @@ export async function handleSettingRequest(request: Request, env: Env): Promise<
   }
 
   if (path === '/api/admin/setting/reset_token' && request.method === 'POST') {
-    return jsonResponse({ code: 200, message: 'success' });
+    return handleResetToken(request, env);
+  }
+
+  if (path === '/api/admin/setting/set_aria2' && request.method === 'POST') {
+    return handleSetAria2(request, env);
+  }
+
+  if (path === '/api/admin/setting/set_qbit' && request.method === 'POST') {
+    return handleSetQbittorrent(request, env);
+  }
+
+  if (path === '/api/admin/setting/set_transmission' && request.method === 'POST') {
+    return handleSetTransmission(request, env);
   }
 
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
@@ -187,4 +199,102 @@ async function handleDefaultSettings(request: Request, env: Env): Promise<Respon
     console.error('Default settings error:', error);
     return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
   }
+}
+
+// POST /api/admin/setting/reset_token - rotate the private token/sign secret.
+// This invalidates all previously issued session tokens.
+async function handleResetToken(request: Request, env: Env): Promise<Response> {
+  try {
+    const token = randomToken(32);
+    await env.DB.prepare(
+      'INSERT OR REPLACE INTO settings (key, value, help, type, options, group_id, flag, index_num) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind('token', token, 'Sign/Token secret (do not expose)', 'string', '', 4, 1, 0).run();
+    const { invalidateSecretCache } = await import('../utils/auth');
+    invalidateSecretCache();
+    return jsonResponse({ code: 200, message: 'success' });
+  } catch (error) {
+    console.error('Reset token error:', error);
+    return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
+  }
+}
+
+// POST /api/admin/setting/set_aria2 - configure aria2 RPC
+async function handleSetAria2(request: Request, env: Env): Promise<Response> {
+  try {
+    const body = await request.json() as any;
+    const uri = body.uri || '';
+    const secret = body.secret || '';
+    await saveSetting(env, 'aria2_uri', uri);
+    await saveSetting(env, 'aria2_secret', secret);
+
+    if (!uri) return jsonResponse({ code: 200, message: 'success' });
+    try {
+      const version = await testAria2(uri, secret);
+      return jsonResponse({ code: 200, message: 'success', data: version });
+    } catch (e: any) {
+      return jsonResponse({ code: 500, message: e.message || 'Failed to connect to aria2' }, 500);
+    }
+  } catch (error) {
+    console.error('Set aria2 error:', error);
+    return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
+  }
+}
+
+// POST /api/admin/setting/set_qbit - configure qBittorrent
+async function handleSetQbittorrent(request: Request, env: Env): Promise<Response> {
+  try {
+    const body = await request.json() as any;
+    const url = body.url || '';
+    const seedtime = body.seedtime || '0';
+    await saveSetting(env, 'qbittorrent_url', url);
+    await saveSetting(env, 'qbittorrent_seedtime', seedtime);
+    return jsonResponse({ code: 200, message: 'success' });
+  } catch (error) {
+    console.error('Set qBittorrent error:', error);
+    return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
+  }
+}
+
+// POST /api/admin/setting/set_transmission - configure Transmission
+async function handleSetTransmission(request: Request, env: Env): Promise<Response> {
+  try {
+    const body = await request.json() as any;
+    const uri = body.uri || '';
+    const seedtime = body.seedtime || '0';
+    await saveSetting(env, 'transmission_uri', uri);
+    await saveSetting(env, 'transmission_seedtime', seedtime);
+    return jsonResponse({ code: 200, message: 'success' });
+  } catch (error) {
+    console.error('Set Transmission error:', error);
+    return jsonResponse({ code: 500, message: 'Internal Server Error' }, 500);
+  }
+}
+
+async function saveSetting(env: Env, key: string, value: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT OR REPLACE INTO settings (key, value, help, type, options, group_id, flag, index_num)
+     VALUES (?, ?, '', 'string', '', 5, 1, 0)`
+  ).bind(key, value).run();
+}
+
+async function testAria2(uri: string, secret: string): Promise<string> {
+  const params: any[] = [];
+  if (secret) params.push(`token:${secret}`);
+  params.push([]);
+  const res = await fetch(uri, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'openlist', method: 'aria2.getVersion', params }),
+  });
+  const data: any = await res.json().catch(() => ({}));
+  if (data.error) throw new Error(data.error.message || 'aria2 connection failed');
+  return data.result?.version || 'ok';
+}
+
+function randomToken(len: number): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const arr = crypto.getRandomValues(new Uint8Array(len));
+  let s = '';
+  for (const b of arr) s += chars[b % chars.length];
+  return s;
 }

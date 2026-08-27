@@ -33,6 +33,8 @@ export const s3Additional: DriverItem[] = [
   { name: 'enable_custom_host_presign', type: 'bool', default: 'false', options: '', required: false, help: 'Enable custom host presign' },
   { name: 'remove_bucket', type: 'bool', default: 'false', options: '', required: false, help: 'Remove bucket from path' },
   { name: 'list_object_version', type: 'select', default: 'v2', options: 'v1,v2', required: false, help: 'List object version' },
+  { name: 'enable_direct_upload', type: 'bool', default: 'false', options: '', required: false, help: 'Enable direct upload' },
+  { name: 'direct_upload_host', type: 'string', default: '', options: '', required: false, help: 'Direct upload host (optional)' },
 ];
 
 export class S3Driver implements Driver {
@@ -44,6 +46,8 @@ export class S3Driver implements Driver {
   private rootPath: string = '';
   private customHost: string = '';
   private signUrlExpire: number = 3600;
+  private enableDirectUpload: boolean = false;
+  private directUploadHost: string = '';
   private baseUrl: string = '';
   private client!: AwsClient;
 
@@ -56,6 +60,8 @@ export class S3Driver implements Driver {
     this.rootPath = (cfg.root_path || '').trim();
     this.customHost = (cfg.custom_host || '').trim();
     this.signUrlExpire = cfg.sign_url_expire || 3600;
+    this.enableDirectUpload = cfg.enable_direct_upload === true || cfg.enable_direct_upload === 'true';
+    this.directUploadHost = (cfg.direct_upload_host || '').trim();
     this.region = (cfg.region || 'us-east-1').trim();
     this.accessKeyId = (cfg.access_key_id || '').trim();
     this.secretAccessKey = (cfg.access_key_secret || '').trim();
@@ -316,8 +322,48 @@ export class S3Driver implements Driver {
     }
   }
 
-  private async copyFile(srcKey: string, dstKey: string): Promise<void> {
-    const url = `${this.baseUrl}/${this.encodePath(dstKey)}`;
+  // Presign a direct upload URL (PUT) so the client can upload without going
+  // through the worker. Enabled via the `enable_direct_upload` config.
+  async getDirectUploadInfo(path: string, cfg: Record<string, any>): Promise<any> {
+    if (!this.enableDirectUpload) {
+      throw new Error('direct upload is not enabled for this storage');
+    }
+    const key = this.getKey(path);
+    const url = `${this.baseUrl}/${this.encodePath(key)}`;
+
+    const signUrl = new URL(url);
+    signUrl.searchParams.set('X-Amz-Expires', String(this.signUrlExpire));
+    const signed = await this.client.sign(new Request(signUrl.toString(), { method: 'PUT' }), {
+      aws: { signQuery: true },
+    });
+
+    let uploadUrl = signed.url;
+    if (this.directUploadHost) {
+      const urlObj = new URL(uploadUrl);
+      uploadUrl = `${this.directUploadHost}${urlObj.pathname}${urlObj.search}`;
+    }
+
+    return { upload_url: uploadUrl, chunk_size: 0, method: 'PUT' };
+  }
+
+  // /api/fs/other - expose the presigned upload URL when direct upload is on.
+  async other(path: string, cfg: Record<string, any>): Promise<any> {
+    if (this.enableDirectUpload && !(await this.exists(path, cfg))) {
+      return { direct_upload_info: await this.getDirectUploadInfo(path, cfg) };
+    }
+    return {};
+  }
+
+  private async exists(path: string, cfg: Record<string, any>): Promise<boolean> {
+    try {
+      await this.get(path, cfg);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async copyFile(srcKey: string, dstKey: string): Promise<void> {    const url = `${this.baseUrl}/${this.encodePath(dstKey)}`;
     const resp = await this.s3Fetch(url, {
       method: 'PUT',
       headers: { 'x-amz-copy-source': `${this.bucket}/${this.encodePath(srcKey)}` },

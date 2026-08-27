@@ -8,8 +8,12 @@ import { handleUserRequest } from './users';
 import { handleDriverRequest } from './drivers';
 import { handleTaskRequest } from './tasks';
 import { handleRefreshRequest } from './refresh';
+import { handleMetaRequest } from './meta';
 import { jsonResponse } from '../utils/response';
-import { getGuestUser } from '../utils/guest';
+import { getAuthUser, verifyToken, verifyPassword, getPermission, hashPasswordForStorage } from '../utils/auth';
+
+// Re-exported for modules that historically imported from ./api
+export { isAnonymousEnabled, getGuestUserFromDB } from './auth';
 
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -30,7 +34,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
   }
 
   if (path === '/api/public/offline_download_tools') {
-    return handleOfflineDownloadTools();
+    return handleOfflineDownloadTools(env);
   }
 
   // Me endpoint (with auth)
@@ -73,28 +77,8 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
 
   // Admin routes (require admin auth)
   if (path.startsWith('/api/admin/')) {
-    // Verify admin token
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
-    }
-    
-    try {
-      const payload = JSON.parse(atob(token));
-      if (payload.exp < Date.now()) {
-        return jsonResponse({ code: 401, message: 'Token expired' }, 401);
-      }
-      
-      const user = await env.DB.prepare(
-        'SELECT id, username, role, disabled FROM users WHERE id = ? AND disabled = 0'
-      ).bind(payload.userId).first();
-      
-      if (!user || (user as any).role < 2) {
-        return jsonResponse({ code: 403, message: 'Permission denied' }, 403);
-      }
-    } catch (e) {
-      return jsonResponse({ code: 401, message: 'Invalid token' }, 401);
-    }
+    const admin = await requireAdmin(request, env);
+    if (admin !== true) return admin;
 
     // Refresh routes (file cache sync) - must be before storage routes
     if (path.startsWith('/api/admin/storage/refresh')) {
@@ -135,12 +119,43 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     if (path.startsWith('/api/admin/meta/')) {
       return handleMetaRequest(request, env);
     }
+
+    // Message routes (push notifications for the admin panel)
+    if (path === '/api/admin/message/get') {
+      return handleMessageGet();
+    }
+    if (path === '/api/admin/message/send') {
+      return jsonResponse({ code: 200, message: 'success' });
+    }
   }
 
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
+// Verify the admin token; returns true when authorized, otherwise a Response.
+async function requireAdmin(request: Request, env: Env): Promise<true | Response> {
+  const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+  if (!token) {
+    return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
+  }
 
+  const payload = await verifyToken(token, env);
+  if (!payload) {
+    return jsonResponse({ code: 401, message: 'Invalid or expired token' }, 401);
+  }
+
+  try {
+    const user = await env.DB.prepare(
+      'SELECT id, username, role, disabled FROM users WHERE id = ? AND disabled = 0'
+    ).bind(payload.userId).first();
+    if (!user || (user as any).role < 2) {
+      return jsonResponse({ code: 403, message: 'Permission denied' }, 403);
+    }
+  } catch {
+    return jsonResponse({ code: 401, message: 'Invalid token' }, 401);
+  }
+  return true;
+}
 
 async function handlePublicSettings(env: Env): Promise<Response> {
   try {
@@ -179,141 +194,84 @@ function handleArchiveExtensions(): Response {
   });
 }
 
-function handleOfflineDownloadTools(): Response {
-  return jsonResponse({
-    code: 200,
-    message: 'success',
-    data: []
-  });
+// Returns the offline download tools that are currently configured.
+async function handleOfflineDownloadTools(env: Env): Promise<Response> {
+  try {
+    const rows = await env.DB.prepare(
+      'SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?)'
+    ).bind('aria2_uri', 'aria2_secret', 'qbittorrent_url', 'qbittorrent_seedtime', 'transmission_uri', 'transmission_seedtime').all();
+    const map: Record<string, string> = {};
+    for (const row of rows.results) map[(row as any).key] = (row as any).value;
+
+    const tools: string[] = [];
+    if (map.aria2_uri) tools.push('aria2');
+    if (map.qbittorrent_url) tools.push('qBittorrent');
+    if (map.transmission_uri) tools.push('Transmission');
+    return jsonResponse({ code: 200, message: 'success', data: tools });
+  } catch (e) {
+    console.error('offline_download_tools error:', e);
+    return jsonResponse({ code: 200, message: 'success', data: [] });
+  }
 }
 
 async function handleGetCurrentUser(request: Request, env: Env): Promise<Response> {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
 
-  // No/invalid token -> guest user (view + download only, no permissions).
-  // When the guest user is disabled, anonymous access is forbidden.
   const guestResponse = async () => {
+    const { getGuestUserFromDB } = await import('./auth');
     const guest = await getGuestUserFromDB(env);
     return jsonResponse({ code: 200, message: 'success', data: guest });
   };
   const deniedResponse = () => jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
 
+  const { isAnonymousEnabled } = await import('./auth');
   const anonymousEnabled = await isAnonymousEnabled(env);
   if (!token) {
     return anonymousEnabled ? guestResponse() : deniedResponse();
   }
 
-  try {
-    const payload = JSON.parse(atob(token));
-    if (payload.exp < Date.now()) {
-      return anonymousEnabled ? guestResponse() : deniedResponse();
-    }
-
-    const user = await env.DB.prepare(
-      'SELECT id, username, role, disabled, otp_secret FROM users WHERE id = ? AND disabled = 0'
-    ).bind(payload.userId).first();
-
-    if (!user) {
-      return anonymousEnabled ? guestResponse() : deniedResponse();
-    }
-
-    return jsonResponse({
-      code: 200,
-      message: 'success',
-      data: {
-        id: (user as any).id,
-        username: (user as any).username,
-        role: (user as any).role,
-        disabled: (user as any).disabled === 1,
-        permission: (user as any).role === 2 ? 0xFFFFFFFF : (user as any).role === 1 ? 0x00000007 : 0x00000001,
-        sso_id: '',
-        otp: !!((user as any).otp_secret),
-        password: '',
-        base_path: '/',
-        home_dir: '/'
-      }
-    });
-  } catch (error) {
+  const user = await getAuthUser(request, env);
+  if (!user) {
     return anonymousEnabled ? guestResponse() : deniedResponse();
   }
-}
 
-// Load the guest user row from the DB (fall back to the hardcoded model if
-// the row is missing).
-async function getGuestUserFromDB(env: Env): Promise<Record<string, any>> {
-  try {
-    const user = await env.DB.prepare(
-      'SELECT * FROM users WHERE username = ?'
-    ).bind('guest').first();
-    if (user) {
-      return {
-        id: (user as any).id,
-        username: (user as any).username,
-        role: (user as any).role,
-        disabled: (user as any).disabled === 1,
-        permission: (user as any).permission ?? 0,
-        sso_id: (user as any).sso_id || '',
-        otp: !!((user as any).otp_secret),
-        password: '',
-        base_path: (user as any).base_path || '/',
-        home_dir: (user as any).home_dir || '/',
-        allow_ldap: false,
-      };
+  return jsonResponse({
+    code: 200,
+    message: 'success',
+    data: {
+      id: (user as any).id,
+      username: (user as any).username,
+      role: (user as any).role,
+      disabled: (user as any).disabled === 1,
+      permission: getPermission(user),
+      sso_id: (user as any).sso_id || '',
+      otp: !!((user as any).otp_secret),
+      password: '',
+      base_path: (user as any).base_path || '/',
+      home_dir: (user as any).base_path || '/',
+      allow_ldap: !!((user as any).allow_ldap) || false,
+      two_factor_login: !!((user as any).otp_secret) || false
     }
-  } catch {
-    // fall through to hardcoded model
-  }
-  return getGuestUser();
-}
-
-// Anonymous browsing is enabled when the "guest" user exists in the users
-// table and is not disabled. This lets admins toggle guest access directly in
-// the user list.
-export async function isAnonymousEnabled(env: Env): Promise<boolean> {
-  try {
-    const user = await env.DB.prepare(
-      'SELECT id, disabled FROM users WHERE username = ?'
-    ).bind('guest').first();
-    if (!user) return false;
-    return (user as any).disabled !== 1;
-  } catch {
-    return false;
-  }
+  });
 }
 
 // POST /api/me/update - update the current user's username / password
 async function handleUpdateCurrentUser(request: Request, env: Env): Promise<Response> {
-  const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-  if (!token) {
+  const user = await getAuthUser(request, env);
+  if (!user) {
     return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
   }
 
   try {
-    const payload = JSON.parse(atob(token));
-    if (payload.exp < Date.now()) {
-      return jsonResponse({ code: 401, message: 'Token expired' }, 401);
-    }
-
-    const user = await env.DB.prepare(
-      'SELECT * FROM users WHERE id = ? AND disabled = 0'
-    ).bind(payload.userId).first();
-
-    if (!user) {
-      return jsonResponse({ code: 401, message: 'Unauthorized' }, 401);
-    }
-
     const body = await request.json() as { username?: string; password?: string; old_password?: string; otp_code?: string };
 
-    // Verify old password if changing password or username
-    if (body.password) {
-      const oldPwd = body.old_password || '';
-      const storedPassword = (user as any).password;
-      const alistSalt = 'https://github.com/alist-org/alist';
-      const oldOk =
-        oldPwd === storedPassword ||
-        oldPwd === await sha256(`${storedPassword}-${alistSalt}`) ||
-        oldPwd === await sha256(storedPassword);
-      if (!oldOk) {
+    // The OpenList/AList frontend profile form does not send `old_password`
+    // (it only sends username/password). The signed token is the authority,
+    // so old-password verification is only applied when the field is present
+    // (API clients that choose to send it get an extra check).
+    if (body.password && body.old_password) {
+      const ok = await verifyPassword((user as any).password, { raw: body.old_password });
+      if (!ok) {
         return jsonResponse({ code: 400, message: 'Old password is incorrect' }, 400);
       }
     }
@@ -322,7 +280,6 @@ async function handleUpdateCurrentUser(request: Request, env: Env): Promise<Resp
     const values: any[] = [];
 
     if (body.username && body.username !== (user as any).username) {
-      // Check username uniqueness
       const taken = await env.DB.prepare(
         'SELECT id FROM users WHERE username = ? AND id != ?'
       ).bind(body.username, (user as any).id).first();
@@ -334,8 +291,16 @@ async function handleUpdateCurrentUser(request: Request, env: Env): Promise<Resp
     }
 
     if (body.password) {
-      updates.push('password = ?');
-      values.push(body.password);
+      const hashed = await hashPasswordForStorage(body.password);
+      const salt = hashed.split(':')[0];
+      const hash = hashed.split(':')[1];
+      // Note: pwd_ts is intentionally NOT bumped here. The user is changing
+      // their own password with their own valid token; bumping pwd_ts would
+      // immediately invalidate the session they are using, causing the
+      // frontend's next API call to 401 and force a confusing re-login
+      // (OpenList's profile page already redirects to /login after a change).
+      updates.push('password = ?', 'salt = ?');
+      values.push(`${salt}:${hash}`, salt);
     }
 
     if (updates.length === 0) {
@@ -356,13 +321,11 @@ async function handleUpdateCurrentUser(request: Request, env: Env): Promise<Resp
   }
 }
 
-async function sha256(input: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(input);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+function handleMessageGet(): Response {
+  // The Worker is stateless, so there is no persistent push channel; the
+  // frontend treats a 404 ("no message") as the quiet state (same as Go when
+  // the in-memory channel is empty).
+  return jsonResponse({ code: 404, message: 'no message' }, 404);
 }
 
 function handleIndexRequest(request: Request, env: Env): Promise<Response> {
@@ -398,25 +361,6 @@ function handleScanRequest(request: Request, env: Env): Promise<Response> {
 
   if (path.includes('/start') || path.includes('/stop')) {
     return Promise.resolve(jsonResponse({ code: 200, message: 'success' }));
-  }
-
-  return Promise.resolve(jsonResponse({ code: 404, message: 'Not Found' }, 404));
-}
-
-function handleMetaRequest(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  const path = url.pathname;
-
-  if (path.includes('/list')) {
-    return Promise.resolve(jsonResponse({
-      code: 200,
-      message: 'success',
-      data: { content: [], total: 0 }
-    }));
-  }
-
-  if (path.includes('/get') || path.includes('/create') || path.includes('/update') || path.includes('/delete')) {
-    return Promise.resolve(jsonResponse({ code: 200, message: 'success', data: {} }));
   }
 
   return Promise.resolve(jsonResponse({ code: 404, message: 'Not Found' }, 404));
