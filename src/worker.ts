@@ -1,4 +1,4 @@
-import { Env } from './types';
+import { ContextLike, Env } from './types';
 import { handleRequest } from './router';
 import { initializeDatabase } from './models/init';
 import { createDatabase } from './db';
@@ -6,7 +6,7 @@ import { createDatabase } from './db';
 let initialized = false;
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ContextLike): Promise<Response> {
     // Initialize database on first request
     if (!initialized) {
       // Route all database operations through the abstraction layer

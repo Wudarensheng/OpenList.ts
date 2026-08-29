@@ -1,5 +1,13 @@
 import type { Database } from './db';
 
+/** Static asset provider (Cloudflare ASSETS binding, external server or local files). */
+export interface AssetProvider {
+  fetch(request: Request): Promise<Response>;
+}
+
+/** Minimal execution context used off Cloudflare (no CF-specific members needed). */
+export interface ContextLike {}
+
 export interface Env {
   /**
    * Database handle. Always accessed through the database abstraction layer;
@@ -8,7 +16,8 @@ export interface Env {
    */
   DB: Database;
   ENVIRONMENT: string;
-  ASSETS: Fetcher;
+  /** Static file source. Optional off Cloudflare; see STATIC_BASE / LOCAL_STATIC. */
+  ASSETS?: AssetProvider;
   /**
    * Database backend switch: "true" (default) uses D1, "false" uses
    * PostgreSQL (via HYPERDRIVE binding or PG_ADDRS). Enables cross-cloud
@@ -19,6 +28,10 @@ export interface Env {
   PG_ADDRS?: string;
   /** Cloudflare Hyperdrive binding (used when USE_D1=false). */
   HYPERDRIVE?: { connectionString: string };
+  /** External static-server base URL (plain fetch, cross-cloud). */
+  STATIC_BASE?: string;
+  /** Local static provider injected by the cross-platform entry (src/server.ts). */
+  LOCAL_STATIC?: AssetProvider;
 }
 
 export interface Storage {

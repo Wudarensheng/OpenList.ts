@@ -1,11 +1,11 @@
-import { Env } from './types';
+import { ContextLike, Env } from './types';
 import { handleApiRequest } from './routes/api';
 import { handleStaticFile } from './routes/static';
 import { handleDownloadRequest } from './routes/download';
 import { handleShareDownload } from './routes/share';
 import { handleWebDavRequest } from './routes/webdav';
 
-export async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+export async function handleRequest(request: Request, env: Env, ctx: ContextLike): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
 
