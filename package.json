@@ -17,6 +17,7 @@
     "@aws-sdk/s3-request-presigner": "^3.540.0",
     "aws4fetch": "^1.0.20",
     "fflate": "^0.8.3",
+    "postgres": "^3.4.9",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {

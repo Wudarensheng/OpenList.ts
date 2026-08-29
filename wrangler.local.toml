@@ -11,6 +11,11 @@ assets = { directory = "./public", binding = "ASSETS" }
 
 [vars]
 ENVIRONMENT = "production"
+# Database backend: "true" = D1 (default), "false" = PostgreSQL.
+# With USE_D1=false the worker connects to the HYPERDRIVE binding first
+# (Cloudflare), falling back to PG_ADDRS for external PostgreSQL (cross-cloud).
+USE_D1 = "true"
+# PG_ADDRS = "postgres://user:pass@host:5432/dbname"
 
 [[d1_databases]]
 binding = "DB"

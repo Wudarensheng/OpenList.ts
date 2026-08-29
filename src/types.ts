@@ -1,7 +1,24 @@
+import type { Database } from './db';
+
 export interface Env {
-  DB: D1Database;
+  /**
+   * Database handle. Always accessed through the database abstraction layer;
+   * at runtime this is a D1 database (D1 mode) or the adapter chosen by
+   * `createDatabase` (PostgreSQL / Hyperdrive mode).
+   */
+  DB: Database;
   ENVIRONMENT: string;
   ASSETS: Fetcher;
+  /**
+   * Database backend switch: "true" (default) uses D1, "false" uses
+   * PostgreSQL (via HYPERDRIVE binding or PG_ADDRS). Enables cross-cloud
+   * deployments outside of Cloudflare.
+   */
+  USE_D1?: string;
+  /** External PostgreSQL connection string, e.g. postgres://user:pass@host:5432/dbname */
+  PG_ADDRS?: string;
+  /** Cloudflare Hyperdrive binding (used when USE_D1=false). */
+  HYPERDRIVE?: { connectionString: string };
 }
 
 export interface Storage {

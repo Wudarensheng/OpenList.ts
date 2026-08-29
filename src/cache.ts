@@ -1,5 +1,6 @@
 import { Env } from './types';
 import { Obj as DriverFileObject, LinkResult } from './drivers/types';
+import type { DbStatement } from './db';
 
 // D1 stores timestamps via SQLite datetime('now'), which produces UTC strings
 // like "2026-08-24 09:16:03" with no timezone marker. Parsing such a string
@@ -68,7 +69,7 @@ export async function cacheFiles(
     ).bind(storageId, parentPath).run();
 
     // Build batch INSERT statements
-    const stmts: D1PreparedStatement[] = [];
+    const stmts: DbStatement[] = [];
     if (files.length > 0) {
       for (const file of files) {
         // Skip the root marker itself (name "/" or empty) - it would produce a

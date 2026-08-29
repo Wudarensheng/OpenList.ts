@@ -2,6 +2,7 @@ import { Env } from '../types';
 import { getDriverInstance } from '../drivers/registry';
 // Cache invalidation is now done surgically (delete stale rows only)
 import { jsonResponse } from '../utils/response';
+import type { DbStatement } from '../db';
 
 export async function handleRefreshRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -88,7 +89,7 @@ async function refreshStorage(storage: any, env: Env): Promise<any> {
   const freshFileIds: string[] = [];
 
   // Build batch insert statements with parent_path
-  const stmts: D1PreparedStatement[] = [];
+  const stmts: DbStatement[] = [];
   for (const file of files) {
     const filePath = file.path;
     const parentPath = filePath.substring(0, filePath.lastIndexOf('/')) || '/';
