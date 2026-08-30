@@ -87,6 +87,7 @@ async function ensureDrivers(): Promise<void> {
     pan123Mod,
     baiduNetdiskMod,
     yun139Mod,
+    lanzouMod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -106,6 +107,7 @@ async function ensureDrivers(): Promise<void> {
     import('./123'),
     import('./baidu_netdisk'),
     import('./139'),
+    import('./lanzou'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -127,6 +129,7 @@ async function ensureDrivers(): Promise<void> {
   if (pan123Mod.pan123Config) registerDriver(pan123Mod.Pan123Driver, pan123Mod.pan123Config, pan123Mod.pan123Additional);
   if (baiduNetdiskMod.baiduNetdiskConfig) registerDriver(baiduNetdiskMod.BaiduNetdiskDriver, baiduNetdiskMod.baiduNetdiskConfig, baiduNetdiskMod.baiduNetdiskAdditional);
   if (yun139Mod.yun139Config) registerDriver(yun139Mod.Yun139Driver, yun139Mod.yun139Config, yun139Mod.yun139Additional);
+  if (lanzouMod.lanzouConfig) registerDriver(lanzouMod.LanZouDriver, lanzouMod.lanzouConfig, lanzouMod.lanzouAdditional);
 }
 
 /**
