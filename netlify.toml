@@ -14,11 +14,9 @@
   publish = "dist-node/public"
   functions = "netlify/functions"
 
-[functions]
-  node_bundler = "esbuild"
-
 [[functions]]
   path = "netlify/functions/server.js"
+  node_bundler = "esbuild"
   # Keep npm dependencies external so the bundled function can require them.
   external_node_modules = ["postgres", "aws4fetch", "qrcode", "fflate"]
   included_files = ["dist-node/public/**"]
