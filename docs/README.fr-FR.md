@@ -4,9 +4,9 @@
 
 [English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
-Un programme de listage de fichiers pour [Cloudflare Workers](https://workers.cloudflare.com/) — une interface web de type OpenList/AList qui parcourt et gère des fichiers sur le stockage compatible S3 (Backblaze B2, Cloudflare R2, AWS S3, MinIO, …), Microsoft OneDrive, Alibaba Cloud Drive, PikPak et Dropbox.
+Un programme de listage de fichiers pour [Cloudflare Workers](https://workers.cloudflare.com/) — une interface web de type OpenList/AList qui parcourt et gère des fichiers sur le stockage compatible S3 (Backblaze B2, Cloudflare R2, AWS S3, MinIO, …), Microsoft OneDrive, OneDrive APP, Alibaba Cloud Drive, PikPak, Dropbox et 189Cloud (天翼云盤).
 
-Le tout est écrit en TypeScript, fonctionne sur le runtime Workers et stocke l'arborescence des fichiers et les liens de téléchargement dans [Cloudflare D1](https://developers.cloudflare.com/d1/).
+Le tout est écrit en TypeScript, fonctionne par défaut sur le runtime Workers et stocke l'arborescence des fichiers et les liens de téléchargement dans [Cloudflare D1](https://developers.cloudflare.com/d1/). La couche de base de données est multi-cloud — avec `USE_D1=false` elle utilise PostgreSQL à la place (une liaison [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) sur Cloudflare, ou une simple chaîne de connexion `PG_ADDRS`) — et le même gestionnaire de requêtes peut aussi fonctionner hors de Cloudflare sur Bun, Deno ou Node (voir [Exécution hors de Cloudflare](#-exécution-hors-de-cloudflare)).
 
 > **OpenList.ts** est un projet de l'écosystème OpenList et un dérivé d'OpenList, faisant partie de l'écosystème OpenList.
 
@@ -14,15 +14,19 @@ Le tout est écrit en TypeScript, fonctionne sur le runtime Workers et stocke l'
 
 ## ✨ Fonctionnalités
 
-- ☁️ Fonctionne entièrement sur Cloudflare Workers + D1 (aucun VPS requis)
-- 📁 Multi-stockage : **compatible S3** (B2 / R2 / AWS / MinIO), **OneDrive**, **OneDrive APP**, **Alibaba Cloud Drive**, **PikPak**, **Dropbox**
-- 🗄️ **Cache d'arborescence D1** : la navigation lit l'arborescence depuis D1 — le fournisseur de stockage n'est contacté que lorsqu'un administrateur visite un chemin à froid, et les URLs de téléchargement sont générées à la demande
+- ☁️ Fonctionne entièrement sur Cloudflare Workers + D1 par défaut (aucun VPS requis)
+- 🌍 **Multi-cloud & multi-plateforme** : la base de données supporte D1 ou PostgreSQL (Hyperdrive / `PG_ADDRS`) ; le même gestionnaire de requêtes fonctionne sur Bun / Deno / Node hors de Cloudflare
+- 📁 Multi-stockage : **compatible S3** (B2 / R2 / AWS / MinIO), **OneDrive**, **OneDrive APP**, **Alibaba Cloud Drive**, **PikPak**, **Dropbox**, **189Cloud (天翼云盤)**
+- 🗄️ **Cache d'arborescence** : la navigation lit l'arborescence depuis la base de données — le fournisseur de stockage n'est contacté que lorsqu'un administrateur visite un chemin à froid, et les URLs de téléchargement sont générées à la demande
 - 🔐 Authentification et autorisation (invité / utilisateur / administrateur)
 - 🛡️ **Authentification à deux facteurs TOTP (2FA)** — compatible Google Authenticator
 - 🔑 Changement de mot de passe et mise à jour du profil
 - 👤 Navigation anonyme (invité) via le compte utilisateur `guest`, désactivée par défaut
-- 🖥️ Panneau d'administration : stockages, réglages, utilisateurs et pilotes
-- 📥 Téléchargement direct (`/d/`) et via proxy (`/p/`), support Range/HEAD
+- 🖥️ Panneau d'administration : stockages, réglages, utilisateurs, pilotes et métadonnées par chemin
+- 🔗 **Partage de fichiers** — partages protégés par mot de passe avec expiration et limites d'accès
+- 📤 **Téléchargement hors-ligne** — confiez URL/magnets à aria2 / qBittorrent / Transmission
+- 🗜️ **Aperçu et extraction d'archives** — listez et extrayez des archives zip / tar / gz sans télécharger tout le fichier
+- 📥 Téléchargement direct (`/d/`), via proxy (`/p/`) et depuis une archive (`/ad/`, `/ap/`, `/ae/`), support Range/HEAD
 - 💻 **WebDAV** (`/dav/`) — montez vos drives cloud en dossier local (Explorateur Windows, Finder macOS, rclone, …)
 - 🔄 Cache des liens pré-signés avec déduplication singleflight
 
@@ -78,7 +82,30 @@ Autres scripts utiles :
 | `npm run lint` | ESLint sur `src` |
 | `npm test` | Exécuteur de tests Vitest |
 | `npm run deploy` | Déploie le worker sur Cloudflare |
+| `npm run build:node` | Construit la version Node.js dans `dist-node/` (`node build.js`) |
 | `npm run db:reset` | Supprime toutes les tables et réinitialise le schéma |
+
+---
+
+## 🌍 Exécution hors de Cloudflare
+
+Le même gestionnaire de requêtes peut fonctionner sur n'importe quel hôte avec des sémantiques Web standard `Request`/`Response`. Comme il n'y a pas de liaison D1 hors de Cloudflare, PostgreSQL est utilisé à la place :
+
+- **Bun** : `bun run src/server.ts`
+- **Deno** : `deno run --allow-net --allow-read --allow-env src/server.ts`
+- **Node** : `node build.js` (ou `npm run build:node`) compile le projet et l'entrée Node intégrée vers `dist-node/`, puis `node dist-node/server-node.js`
+- **Fonctions cloud** : exécutez `node build.js` comme étape de build du fournisseur et pointez l'entrée de la fonction vers `dist-node/server-node.js`
+
+Exigences (pas de liaison D1 hors de Cloudflare) :
+
+```bash
+USE_D1=false                              # Mode PostgreSQL
+PG_ADDRS=postgres://user:pass@host:5432/dbname
+# optionnel : STATIC_BASE=https://...     # servir les assets depuis un serveur externe
+# optionnel : PUBLIC_DIR=/path/to/public  # build node : fichiers statiques locaux (défaut dist-node/public)
+# optionnel : PORT=3000                   # build node : port d'écoute
+# optionnel : HOST=0.0.0.0                # build node : adresse de liaison
+```
 
 ---
 
@@ -176,6 +203,20 @@ Exemple `addition` (OneDrive APP) :
 }
 ```
 
+### 189Cloud (天翼云盤)
+
+Exemple `addition` :
+
+```json
+{
+  "username": "your-phone-number",
+  "password": "your-password",
+  "cookie": ""
+}
+```
+
+> Si la connexion échoue à cause d'un CAPTCHA, remplissez le champ `cookie` avec un cookie de session connecté.
+
 ---
 
 ## 📡 Référence API
@@ -191,6 +232,10 @@ Exemple `addition` (OneDrive APP) :
 | POST | `/api/auth/2fa/generate` | Générer un secret TOTP (retourne `secret` + `qr`) |
 | POST | `/api/auth/2fa/verify` | Vérifier un code et activer la 2FA |
 | POST | `/api/auth/2fa/disable` | Désactiver la 2FA (code valide requis) |
+| GET | `/api/auth/sso` | Redirection de connexion SSO (Github / Microsoft / Google / OIDC) |
+| GET | `/api/auth/sso_callback` | Rappel SSO |
+| GET | `/api/auth/get_sso_id` | Obtenir l'identité SSO de l'utilisateur courant |
+| GET | `/api/auth/sso_get_token` | Échanger un code SSO contre un jeton de session |
 
 ### Profil
 
@@ -209,12 +254,23 @@ Exemple `addition` (OneDrive APP) :
 | POST | `/api/fs/dirs` | Lister les dossiers (`path`) |
 | POST | `/api/fs/mkdir` | Créer un dossier (`path`, `name`) |
 | POST | `/api/fs/rename` | Renommer (`path`, `name`) |
+| POST | `/api/fs/batch_rename` | Renommage par lot |
+| POST | `/api/fs/regex_rename` | Renommage par expression régulière |
 | POST | `/api/fs/remove` | Supprimer (`dir`, `names[]`) |
+| POST | `/api/fs/remove_empty_directory` | Supprimer les dossiers vides |
 | POST | `/api/fs/move` | Déplacer (`src_dir`, `dst_dir`, `names[]`) |
+| POST | `/api/fs/recursive_move` | Déplacement récursif |
 | POST | `/api/fs/copy` | Copier (`src_dir`, `dst_dir`, `names[]`) |
 | PUT | `/api/fs/put` | Téléverser (`?path=` + corps) |
 | PUT | `/api/fs/form` | Téléversement multipart |
+| POST | `/api/fs/add_offline_download` | Ajouter une tâche de téléchargement hors-ligne (aria2 / qBittorrent / Transmission) |
+| POST | `/api/fs/archive/meta` | Obtenir les métadonnées d'archive (`path`) |
+| POST | `/api/fs/archive/list` | Lister les fichiers d'une archive (`path`, `inner`) |
+| POST | `/api/fs/archive/decompress` | Décompresser une archive (`src_dir`, `dst_dir`, `names[]`) |
 | POST | `/api/fs/search` | Recherche (stub) |
+| POST | `/api/fs/other` | Autres opérations du pilote (stub) |
+| POST | `/api/fs/link` | Générer un lien de téléchargement (`path`) |
+| POST | `/api/fs/get_direct_upload_info` | Obtenir les infos de téléversement direct |
 
 ### Téléchargement / proxy
 
@@ -222,6 +278,22 @@ Exemple `addition` (OneDrive APP) :
 |---|---|---|
 | GET | `/d/<path>` | Redirection 302 vers l'URL signée |
 | GET/HEAD | `/p/<path>` | Diffuser le fichier via le worker (Range supporté) |
+| GET | `/ad/<path>?inner=` | Diffuser un fichier depuis une archive |
+| GET | `/ap/<path>?inner=` | Proxifier un fichier depuis une archive (Range supporté) |
+| GET | `/ae/<path>?inner=` | Extraire une entrée d'archive (téléchargement) |
+| GET | `/sd/<sid>/<path>` | Télécharger un fichier d'un partage (`pwd` pour les partages protégés) |
+
+### Partage
+
+| Méthode | Chemin | Description |
+|---|---|---|
+| GET | `/api/share/list` | Lister les partages |
+| GET | `/api/share/get?id=` | Obtenir un partage |
+| POST | `/api/share/create` | Créer un partage (`files[]`, `expires`, `pwd`, `max_accessed`, …) |
+| POST | `/api/share/update` | Mettre à jour un partage |
+| POST | `/api/share/delete?id=` | Supprimer un partage |
+| POST | `/api/share/enable?id=` | Activer un partage |
+| POST | `/api/share/disable?id=` | Désactiver un partage |
 
 ### WebDAV
 
@@ -271,13 +343,35 @@ Chaque stockage apparaît comme un dossier de premier niveau sous `/dav/` (ex. `
 | GET | `/api/admin/driver/list` | Carte des infos pilotes |
 | GET | `/api/admin/driver/info?driver=` | Infos d'un pilote |
 
+### Administration — métadonnées (par chemin)
+
+| Méthode | Chemin | Description |
+|---|---|---|
+| GET | `/api/admin/meta/list` | Lister les métadonnées |
+| GET | `/api/admin/meta/get?path=` | Obtenir les métadonnées d'un chemin |
+| POST | `/api/admin/meta/create` | Créer des métadonnées (readme / header / mot de passe / masquer / utilisateurs lecture-écriture) |
+| POST | `/api/admin/meta/update` | Mettre à jour des métadonnées |
+| POST | `/api/admin/meta/delete?path=` | Supprimer des métadonnées |
+
+### Tâches (téléchargement hors-ligne, transfert, …)
+
+| Méthode | Chemin | Description |
+|---|---|---|
+| GET | `/api/task/<type>/undone` | Lister les tâches non terminées |
+| GET | `/api/task/<type>/done` | Lister les tâches terminées |
+| GET | `/api/task/<type>/info?tid=` | Obtenir les infos d'une tâche |
+| POST | `/api/task/<type>/cancel?tid=` | Annuler une tâche |
+| POST | `/api/task/<type>/delete?tid=` | Supprimer une tâche |
+| POST | `/api/task/<type>/retry?tid=` | Réessayer une tâche |
+| POST | `/api/task/<type>/clear_done` | Effacer les tâches terminées |
+
 ### Public
 
 | Méthode | Chemin | Description |
 |---|---|---|
 | GET | `/api/public/settings` | Réglages publics (titre du site, logo, favicon, …) |
 | GET | `/api/public/archive_extensions` | Extensions d'archives |
-| GET | `/api/public/offline_download_tools` | Outils de téléchargement hors-ligne (stub) |
+| GET | `/api/public/offline_download_tools` | Outils de téléchargement hors-ligne configurés (aria2 / qBittorrent / Transmission) |
 
 ---
 
@@ -291,6 +385,9 @@ Chaque stockage apparaît comme un dossier de premier niveau sous `/dav/` (ex. `
 | `favicon` | `/images/logo.png` | Favicon |
 | `max_connections` | `0` | Connexions max (0 = illimité) |
 | `cache_expiration` | `30` | Durée de vie du cache (minutes) |
+| `aria2_uri` / `aria2_secret` | | Endpoint RPC aria2 / secret (téléchargement hors-ligne) |
+| `qbittorrent_url` / `qbittorrent_seedtime` | | Web API qBittorrent / temps de partage (téléchargement hors-ligne) |
+| `transmission_uri` / `transmission_seedtime` | | RPC Transmission / temps de partage (téléchargement hors-ligne) |
 
 > La navigation anonyme est contrôlée par le compte **`guest`** dans la liste des
 > utilisateurs — créé désactivé par défaut. Activez-le pour permettre aux visiteurs
@@ -302,6 +399,12 @@ Chaque stockage apparaît comme un dossier de premier niveau sous `/dav/` (ex. `
 
 ```
 src/
+├── db/                       # Couche de base de données multi-cloud (D1 / PostgreSQL / Hyperdrive)
+│   ├── types.ts              # Interface Database partagée (aucun type CF)
+│   ├── d1.ts                 # Adaptateur D1 (Cloudflare)
+│   ├── postgres.ts           # Adaptateur PostgreSQL (postgres.js, multi-cloud)
+│   ├── sqlite.ts             # Traducteur SQL SQLite → PostgreSQL
+│   └── index.ts              # createDatabase(env) : bascule USE_D1 / PG_ADDRS
 ├── drivers/                  # Pilotes de stockage
 │   ├── types.ts              # Interfaces de base des pilotes
 │   ├── registry.ts           # Enregistrement et recherche des pilotes
@@ -311,30 +414,46 @@ src/
 │   ├── onedrive_app/         # Pilote OneDrive APP (application Azure AD)
 │   ├── aliyundrive_open/     # Pilote Alibaba Cloud Drive
 │   ├── pikpak/               # Pilote PikPak
-│   └── dropbox/              # Pilote Dropbox
+│   ├── dropbox/              # Pilote Dropbox
+│   ├── cloud189/             # Pilote 189Cloud (天翼云盤)
+│   ├── google_drive/         # Pilote Google Drive
+│   ├── webdav/               # Pilote WebDAV
+│   └── template.ts           # Squelette de pilote prêt à copier
 ├── models/
 │   ├── init.ts               # Initialisation du schéma et données par défaut
 │   └── schema.sql            # Schéma D1
 ├── routes/
 │   ├── api.ts                # Routeur API
 │   ├── auth.ts               # Authentification + 2FA + profil
-│   ├── fs.ts                 # Routes système de fichiers + cache D1
-│   ├── download.ts           # Routes de téléchargement /d/ et /p/
+│   ├── sso.ts                # Connexion SSO (Github / Microsoft / Google / OIDC)
+│   ├── fs.ts                 # Routes système de fichiers + cache base de données
+│   ├── download.ts           # Routes de téléchargement /d/, /p/ et archives
+│   ├── share.ts              # Routes de partage de fichiers
 │   ├── storage.ts            # Routes d'administration des stockages
 │   ├── settings.ts           # Routes d'administration des réglages
 │   ├── users.ts              # Routes d'administration des utilisateurs
 │   ├── drivers.ts            # Routes d'administration des pilotes
+│   ├── meta.ts               # Routes d'administration des métadonnées par chemin
+│   ├── tasks.ts              # Routes de tâches (téléchargement hors-ligne, transfert, …)
 │   ├── refresh.ts            # Routes de rafraîchissement du cache
+│   ├── webdav.ts             # Routes WebDAV
 │   └── static.ts             # Assets statiques
 ├── utils/
 │   ├── otp.ts                # Implémentation TOTP
 │   ├── crypto.ts             # Aides de hachage de mot de passe
+│   ├── auth.ts               # Aides jeton / mot de passe / permissions
+│   ├── sign.ts               # Signature des liens de téléchargement
 │   ├── guest.ts              # Modèle utilisateur invité
-│   └── response.ts           # Aide de réponse JSON
-├── cache.ts                  # Primitives de cache D1 (fichiers, liens, verrous)
+│   ├── response.ts           # Aide de réponse JSON
+│   ├── meta.ts               # Aides de métadonnées par chemin
+│   ├── archive.ts            # Aperçu / extraction d'archives (zip / tar / gz)
+│   └── offline.ts            # Téléchargement hors-ligne (aria2 / qBittorrent / Transmission)
+├── cache.ts                  # Primitives de cache base de données (fichiers, liens, verrous)
 ├── router.ts                 # Routeur principal
 ├── types.ts                  # Types TypeScript
-└── worker.ts                 # Point d'entrée du worker
+├── static-local.ts           # Fournisseur statique local (Bun / Deno, sans node)
+├── server.ts                 # Entrée multi-plateforme (Bun / Deno)
+└── worker.ts                 # Point d'entrée du worker (Cloudflare)
 ```
 
 ### Ajouter un nouveau pilote de stockage

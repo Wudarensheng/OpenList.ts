@@ -4,9 +4,9 @@
 
 [English](../README.md) · [簡體中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
-一個基於 [Cloudflare Workers](https://workers.cloudflare.com/) 的文件列表程序 —— 採用 OpenList/AList 風格網頁界面，可瀏覽和管理 S3 兼容存儲（Backblaze B2、Cloudflare R2、AWS S3、MinIO 等）、Microsoft OneDrive、阿里雲盤、PikPak 和 Dropbox 上的文件。
+一個基於 [Cloudflare Workers](https://workers.cloudflare.com/) 的文件列表程序 —— 採用 OpenList/AList 風格網頁界面，可瀏覽和管理 S3 兼容存儲（Backblaze B2、Cloudflare R2、AWS S3、MinIO 等）、Microsoft OneDrive、OneDrive APP、阿里雲盤、PikPak、Dropbox 和天翼雲盤（189Cloud）上的文件。
 
-全部使用 TypeScript 編寫，運行在 Workers 運行時上，文件樹和下載鏈接緩存存儲在 [Cloudflare D1](https://developers.cloudflare.com/d1/) 中。
+全部使用 TypeScript 編寫，默認運行在 Workers 運行時上，文件樹和下載鏈接緩存存儲在 [Cloudflare D1](https://developers.cloudflare.com/d1/) 中。數據庫層是跨雲的 —— 設置 `USE_D1=false` 時改用 PostgreSQL（Cloudflare 上走 [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) 綁定，或直接使用 `PG_ADDRS` 連接串）；同一套請求處理邏輯也可以在 Cloudflare 之外的 Bun / Deno / Node 上運行（見[在 Cloudflare 之外運行](#-在-cloudflare-之外運行)）。
 
 > **OpenList.ts** 是 OpenList 生態項目及衍生項目，屬於 OpenList 生態。
 
@@ -14,15 +14,19 @@
 
 ## ✨ 功能特性
 
-- ☁️ 完全運行在 Cloudflare Workers + D1 上（無需 VPS）
-- 📁 多存儲支持：**S3 兼容**（B2 / R2 / AWS / MinIO）、**OneDrive**、**OneDrive APP**、**阿里雲盤**、**PikPak**、**Dropbox**
-- 🗄️ **D1 文件樹緩存**：瀏覽時從 D1 讀取緩存的文件樹 —— 僅當管理員訪問冷路徑時才聯繫存儲提供商，下載鏈接在下載時才按需生成
+- ☁️ 默認完全運行在 Cloudflare Workers + D1 上（無需 VPS）
+- 🌍 **跨雲與跨平台**：數據庫層支持 D1 或 PostgreSQL（Hyperdrive / `PG_ADDRS`）；同一套請求處理邏輯可在 Cloudflare 之外的 Bun / Deno / Node 上運行
+- 📁 多存儲支持：**S3 兼容**（B2 / R2 / AWS / MinIO）、**OneDrive**、**OneDrive APP**、**阿里雲盤**、**PikPak**、**Dropbox**、**天翼雲盤（189Cloud）**
+- 🗄️ **文件樹緩存**：瀏覽時從數據庫讀取緩存的文件樹 —— 僅當管理員訪問冷路徑時才聯繫存儲提供商，下載鏈接在下載時才按需生成
 - 🔐 用戶認證與授權（訪客 / 普通用戶 / 管理員）
 - 🛡️ **TOTP 雙因素認證（2FA）** —— 兼容 Google Authenticator
 - 🔑 修改密碼與個人資料
 - 👤 通過 `guest` 用戶賬號提供可選的匿名（訪客）瀏覽，默認關閉
-- 🖥️ 管理面板：存儲、設置、用戶和驅動管理
-- 📥 直鏈下載（`/d/`）與代理下載（`/p/`），支持 Range/HEAD
+- 🖥️ 管理面板：存儲、設置、用戶、驅動和路徑元數據管理
+- 🔗 **文件分享** —— 支持密碼保護、有效期與訪問次數限制
+- 📤 **離線下載** —— 把 URL / magnet 交給 aria2 / qBittorrent / Transmission
+- 🗜️ **壓縮包預覽與解壓** —— 無需下載整個文件即可查看 zip / tar / gz 內容
+- 📥 直鏈下載（`/d/`）、代理下載（`/p/`）與壓縮包下載（`/ad/`、`/ap/`、`/ae/`），支持 Range/HEAD
 - 💻 **WebDAV**（`/dav/`）—— 將雲端網盤掛載為本地資料夾（Windows 資源管理器、macOS Finder、rclone 等）
 - 🔄 預簽名鏈接緩存與單飛去重
 
@@ -78,7 +82,30 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 | `npm run lint` | 對 `src` 運行 ESLint |
 | `npm test` | Vitest 測試運行器 |
 | `npm run deploy` | 部署到 Cloudflare |
+| `npm run build:node` | 構建 Node 版本到 `dist-node/`（`node build.js`） |
 | `npm run db:reset` | 刪除所有表並重新初始化 schema |
+
+---
+
+## 🌍 在 Cloudflare 之外運行
+
+同一套請求處理邏輯可以在任何支持 Web 標準 `Request`/`Response` 語義的平台上運行。由於 Cloudflare 之外沒有 D1 綁定，改用 PostgreSQL：
+
+- **Bun**：`bun run src/server.ts`
+- **Deno**：`deno run --allow-net --allow-read --allow-env src/server.ts`
+- **Node**：`node build.js`（或 `npm run build:node`）會把項目與內嵌的 Node 入口編譯到 `dist-node/`，然後 `node dist-node/server-node.js`
+- **雲函數**：在廠商構建步驟中運行 `node build.js`，並將函數入口指向 `dist-node/server-node.js`
+
+運行要求（Cloudflare 之外沒有 D1 綁定）：
+
+```bash
+USE_D1=false                              # PostgreSQL 模式
+PG_ADDRS=postgres://user:pass@host:5432/dbname
+# 可選：STATIC_BASE=https://...           # 由外部服務器提供靜態資源
+# 可選：PUBLIC_DIR=/path/to/public        # node 構建：本地靜態文件（默認 dist-node/public）
+# 可選：PORT=3000                         # node 構建：監聽端口
+# 可選：HOST=0.0.0.0                      # node 構建：綁定地址
+```
 
 ---
 
@@ -174,6 +201,20 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 }
 ```
 
+### 天翼雲盤（189Cloud）
+
+`addition` 示例：
+
+```json
+{
+  "username": "your-phone-number",
+  "password": "your-password",
+  "cookie": ""
+}
+```
+
+> 如果因驗證碼無法登錄，可在 `cookie` 字段填入已登錄的會話 Cookie。
+
 ---
 
 ## 📡 API 參考
@@ -189,6 +230,10 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 | POST | `/api/auth/2fa/generate` | 生成 TOTP 密鑰（返回 `secret` + `qr`） |
 | POST | `/api/auth/2fa/verify` | 驗證驗證碼並啟用 2FA |
 | POST | `/api/auth/2fa/disable` | 禁用 2FA（需提供有效驗證碼） |
+| GET | `/api/auth/sso` | SSO 登錄跳轉（Github / Microsoft / Google / OIDC） |
+| GET | `/api/auth/sso_callback` | SSO 回調 |
+| GET | `/api/auth/get_sso_id` | 獲取當前用戶的 SSO 身份 |
+| GET | `/api/auth/sso_get_token` | 用 SSO 授權碼換取會話令牌 |
 
 ### 個人資料
 
@@ -207,12 +252,23 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 | POST | `/api/fs/dirs` | 列出目錄（`path`） |
 | POST | `/api/fs/mkdir` | 創建目錄（`path`、`name`） |
 | POST | `/api/fs/rename` | 重命名（`path`、`name`） |
+| POST | `/api/fs/batch_rename` | 批量重命名 |
+| POST | `/api/fs/regex_rename` | 正則重命名 |
 | POST | `/api/fs/remove` | 刪除（`dir`、`names[]`） |
+| POST | `/api/fs/remove_empty_directory` | 刪除空目錄 |
 | POST | `/api/fs/move` | 移動（`src_dir`、`dst_dir`、`names[]`） |
+| POST | `/api/fs/recursive_move` | 遞歸移動 |
 | POST | `/api/fs/copy` | 複製（`src_dir`、`dst_dir`、`names[]`） |
 | PUT | `/api/fs/put` | 上傳（`?path=` + 請求體） |
 | PUT | `/api/fs/form` | 表單上傳 |
+| POST | `/api/fs/add_offline_download` | 添加離線下載任務（aria2 / qBittorrent / Transmission） |
+| POST | `/api/fs/archive/meta` | 獲取壓縮包元信息（`path`） |
+| POST | `/api/fs/archive/list` | 列出壓縮包內文件（`path`、`inner`） |
+| POST | `/api/fs/archive/decompress` | 解壓壓縮包（`src_dir`、`dst_dir`、`names[]`） |
 | POST | `/api/fs/search` | 搜索（佔位） |
+| POST | `/api/fs/other` | 其他驅動操作（佔位） |
+| POST | `/api/fs/link` | 生成下載鏈接（`path`） |
+| POST | `/api/fs/get_direct_upload_info` | 獲取直傳信息 |
 
 ### 下載 / 代理
 
@@ -220,6 +276,22 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 |---|---|---|
 | GET | `/d/<path>` | 302 跳轉到簽名下載鏈接 |
 | GET/HEAD | `/p/<path>` | 通過 Worker 流式傳輸文件（支持 Range） |
+| GET | `/ad/<path>?inner=` | 流式讀取壓縮包內的單個文件 |
+| GET | `/ap/<path>?inner=` | 代理壓縮包內的單個文件（支持 Range） |
+| GET | `/ae/<path>?inner=` | 解壓壓縮包內單個條目（下載） |
+| GET | `/sd/<sid>/<path>` | 下載分享中的文件（密碼分享需 `pwd`） |
+
+### 分享
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/api/share/list` | 列出分享 |
+| GET | `/api/share/get?id=` | 獲取分享 |
+| POST | `/api/share/create` | 創建分享（`files[]`、`expires`、`pwd`、`max_accessed` 等） |
+| POST | `/api/share/update` | 更新分享 |
+| POST | `/api/share/delete?id=` | 刪除分享 |
+| POST | `/api/share/enable?id=` | 啟用分享 |
+| POST | `/api/share/disable?id=` | 停用分享 |
 
 ### WebDAV
 
@@ -269,13 +341,35 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 | GET | `/api/admin/driver/list` | 完整驅動信息 |
 | GET | `/api/admin/driver/info?driver=` | 單個驅動信息 |
 
+### 管理 — 元數據（路徑級）
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/api/admin/meta/list` | 列出元數據 |
+| GET | `/api/admin/meta/get?path=` | 獲取某路徑的元數據 |
+| POST | `/api/admin/meta/create` | 創建元數據（readme / header / 密碼 / 隱藏 / 讀寫用戶） |
+| POST | `/api/admin/meta/update` | 更新元數據 |
+| POST | `/api/admin/meta/delete?path=` | 刪除元數據 |
+
+### 任務（離線下載、傳輸等）
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/api/task/<type>/undone` | 未完成任務列表 |
+| GET | `/api/task/<type>/done` | 已完成任務列表 |
+| GET | `/api/task/<type>/info?tid=` | 任務詳情 |
+| POST | `/api/task/<type>/cancel?tid=` | 取消任務 |
+| POST | `/api/task/<type>/delete?tid=` | 刪除任務 |
+| POST | `/api/task/<type>/retry?tid=` | 重試任務 |
+| POST | `/api/task/<type>/clear_done` | 清空已完成任務 |
+
 ### 公開
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
 | GET | `/api/public/settings` | 公開設置（站點標題、logo、favicon 等） |
 | GET | `/api/public/archive_extensions` | 壓縮文件擴展名 |
-| GET | `/api/public/offline_download_tools` | 離線下載工具（佔位） |
+| GET | `/api/public/offline_download_tools` | 已配置的離線下載工具（aria2 / qBittorrent / Transmission） |
 
 ---
 
@@ -289,6 +383,9 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 | `favicon` | `/images/logo.png` | 站點圖標 |
 | `max_connections` | `0` | 最大連接數（0 = 不限） |
 | `cache_expiration` | `30` | 默認緩存有效期（分鐘） |
+| `aria2_uri` / `aria2_secret` | | aria2 RPC 地址 / 密鑰（離線下載） |
+| `qbittorrent_url` / `qbittorrent_seedtime` | | qBittorrent Web API / 做種時間（離線下載） |
+| `transmission_uri` / `transmission_seedtime` | | Transmission RPC / 做種時間（離線下載） |
 
 > 匿名瀏覽由用戶列表中的 **`guest` 用戶賬號**控制 —— 默認停用。啟用它即可允許訪客無需登錄瀏覽。
 
@@ -298,6 +395,12 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 
 ```
 src/
+├── db/                       # 跨雲數據庫層（D1 / PostgreSQL / Hyperdrive）
+│   ├── types.ts              # 共享 Database 接口（不含 CF 專有類型）
+│   ├── d1.ts                 # D1 適配器（Cloudflare）
+│   ├── postgres.ts           # PostgreSQL 適配器（postgres.js，跨雲）
+│   ├── sqlite.ts             # SQLite → PostgreSQL SQL 轉換器
+│   └── index.ts              # createDatabase(env)：USE_D1 / PG_ADDRS 切換
 ├── drivers/                  # 存儲驅動
 │   ├── types.ts              # 核心驅動接口
 │   ├── registry.ts           # 驅動註冊與查找
@@ -307,30 +410,46 @@ src/
 │   ├── onedrive_app/         # OneDrive APP（Azure AD 應用）驅動
 │   ├── aliyundrive_open/     # 阿里雲盤驅動
 │   ├── pikpak/               # PikPak 驅動
-│   └── dropbox/              # Dropbox 驅動
+│   ├── dropbox/              # Dropbox 驅動
+│   ├── cloud189/             # 天翼雲盤（189Cloud）驅動
+│   ├── google_drive/         # Google Drive 驅動
+│   ├── webdav/               # WebDAV 驅動
+│   └── template.ts           # 可直接複製的驅動模板
 ├── models/
 │   ├── init.ts               # schema 初始化與默認數據
 │   └── schema.sql            # D1 schema
 ├── routes/
 │   ├── api.ts                # API 路由
 │   ├── auth.ts               # 認證 + 2FA + 個人資料
-│   ├── fs.ts                 # 文件系統路由 + D1 緩存
-│   ├── download.ts           # /d/ 和 /p/ 下載路由
+│   ├── sso.ts                # SSO 登錄（Github / Microsoft / Google / OIDC）
+│   ├── fs.ts                 # 文件系統路由 + 數據庫緩存
+│   ├── download.ts           # /d/、/p/ 與壓縮包下載路由
+│   ├── share.ts              # 文件分享路由
 │   ├── storage.ts            # 存儲管理路由
 │   ├── settings.ts           # 設置管理路由
 │   ├── users.ts              # 用戶管理路由
 │   ├── drivers.ts            # 驅動管理路由
+│   ├── meta.ts               # 路徑級元數據管理路由
+│   ├── tasks.ts              # 任務路由（離線下載、傳輸等）
 │   ├── refresh.ts            # 緩存刷新路由
+│   ├── webdav.ts             # WebDAV 路由
 │   └── static.ts             # 靜態資源
 ├── utils/
 │   ├── otp.ts                # TOTP 實現
 │   ├── crypto.ts             # 密碼哈希輔助
+│   ├── auth.ts               # 令牌 / 密碼 / 權限輔助
+│   ├── sign.ts               # 下載鏈接簽名
 │   ├── guest.ts              # 訪客用戶模型
-│   └── response.ts           # JSON 響應輔助
-├── cache.ts                  # D1 緩存原語（文件、鏈接、鎖）
+│   ├── response.ts           # JSON 響應輔助
+│   ├── meta.ts               # 路徑級元數據輔助
+│   ├── archive.ts            # 壓縮包預覽 / 解壓（zip / tar / gz）
+│   └── offline.ts            # 離線下載（aria2 / qBittorrent / Transmission）
+├── cache.ts                  # 數據庫緩存原語（文件、鏈接、鎖）
 ├── router.ts                 # 主路由
 ├── types.ts                  # TypeScript 類型
-└── worker.ts                 # Worker 入口
+├── static-local.ts           # 本地靜態資源提供器（Bun / Deno，無 node 依賴）
+├── server.ts                 # 跨平台入口（Bun / Deno）
+└── worker.ts                 # Worker 入口（Cloudflare）
 ```
 
 ### 添加新的存儲驅動

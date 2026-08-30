@@ -4,9 +4,9 @@
 
 [English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
-[Cloudflare Workers](https://workers.cloudflare.com/)용 파일 목록 프로그램입니다. OpenList/AList 스타일의 웹 UI로 S3 호환 스토리지(Backblaze B2, Cloudflare R2, AWS S3, MinIO 등), Microsoft OneDrive, Alibaba Cloud Drive, PikPak, Dropbox의 파일을 탐색하고 관리합니다.
+[Cloudflare Workers](https://workers.cloudflare.com/)용 파일 목록 프로그램입니다. OpenList/AList 스타일의 웹 UI로 S3 호환 스토리지(Backblaze B2, Cloudflare R2, AWS S3, MinIO 등), Microsoft OneDrive, OneDrive APP, Alibaba Cloud Drive, PikPak, Dropbox, 189Cloud(天翼云盤)의 파일을 탐색하고 관리합니다.
 
-전체가 TypeScript로 작성되었으며, Workers 런타임에서 실행되고 파일 트리와 다운로드 링크는 [Cloudflare D1](https://developers.cloudflare.com/d1/)에 캐시됩니다.
+전체가 TypeScript로 작성되었으며, 기본적으로 Workers 런타임에서 실행되고 파일 트리와 다운로드 링크는 [Cloudflare D1](https://developers.cloudflare.com/d1/)에 캐시됩니다. 데이터베이스 계층은 클라우드 간 이식이 가능합니다 — `USE_D1=false`로 설정하면 PostgreSQL(Cloudflare에서는 [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) 바인딩, 또는 일반 `PG_ADDRS` 연결 문자열)을 사용합니다. 동일한 요청 핸들러는 Cloudflare 외부의 Bun / Deno / Node에서도 실행할 수 있습니다([Cloudflare 외부에서 실행](#-cloudflare-외부에서-실행) 참고).
 
 > **OpenList.ts**는 OpenList 생태계 프로젝트이자 OpenList의 파생 프로젝트로, OpenList 생태계에 속합니다.
 
@@ -14,15 +14,19 @@
 
 ## ✨ 기능
 
-- ☁️ Cloudflare Workers + D1에서 완전히 동작 (VPS 불필요)
-- 📁 다중 스토리지 지원: **S3 호환**(B2 / R2 / AWS / MinIO), **OneDrive**, **OneDrive APP**, **Alibaba Cloud Drive**, **PikPak**, **Dropbox**
-- 🗄️ **D1 파일 트리 캐시**: 탐색 시 D1의 캐시된 파일 트리를 읽음 — 관리자가 콜드 경로를 방문할 때만 스토리지 제공자에 접속하고, 다운로드 URL은 다운로드 시에 지연 생성
+- ☁️ 기본적으로 Cloudflare Workers + D1에서 완전히 동작 (VPS 불필요)
+- 🌍 **클라우드 간·크로스플랫폼**: 데이터베이스 계층이 D1 또는 PostgreSQL(Hyperdrive / `PG_ADDRS`)을 지원. 동일한 요청 핸들러는 Cloudflare 외부의 Bun / Deno / Node에서도 실행 가능
+- 📁 다중 스토리지 지원: **S3 호환**(B2 / R2 / AWS / MinIO), **OneDrive**, **OneDrive APP**, **Alibaba Cloud Drive**, **PikPak**, **Dropbox**, **189Cloud(天翼云盤)**
+- 🗄️ **파일 트리 캐시**: 탐색 시 데이터베이스의 캐시된 파일 트리를 읽음 — 관리자가 콜드 경로를 방문할 때만 스토리지 제공자에 접속하고, 다운로드 URL은 다운로드 시에 지연 생성
 - 🔐 사용자 인증 및 권한 (게스트 / 사용자 / 관리자)
 - 🛡️ **TOTP 이중 인증(2FA)** — Google Authenticator 호환
 - 🔑 비밀번호 변경 및 프로필 업데이트
 - 👤 `guest` 사용자 계정으로 익명(게스트) 탐색 선택 지원, 기본 비활성화
-- 🖥️ 관리자 패널: 스토리지, 설정, 사용자, 드라이버 관리
-- 📥 직접 다운로드(`/d/`) 및 프록시 다운로드(`/p/`), Range/HEAD 지원
+- 🖥️ 관리자 패널: 스토리지, 설정, 사용자, 드라이버, 경로별 메타데이터 관리
+- 🔗 **파일 공유** — 비밀번호 보호, 만료, 접근 횟수 제한 지원
+- 📤 **오프라인 다운로드** — URL / magnet을 aria2 / qBittorrent / Transmission에 전달
+- 🗜️ **아카이브 미리보기 및 압축 해제** — 전체 파일을 다운로드하지 않고 zip / tar / gz 내용을 탐색·추출
+- 📥 직접 다운로드(`/d/`), 프록시 다운로드(`/p/`), 아카이브 다운로드(`/ad/`, `/ap/`, `/ae/`), Range/HEAD 지원
 - 💻 **WebDAV**(`/dav/`) — 클라우드 드라이브를 로컬 폴더로 마운트(Windows 탐색기, macOS Finder, rclone 등)
 - 🔄 서명된 링크 캐시 및 singleflight 중복 제거
 
@@ -78,7 +82,30 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 | `npm run lint` | `src`에 대해 ESLint |
 | `npm test` | Vitest 테스트 러너 |
 | `npm run deploy` | Cloudflare에 배치 |
+| `npm run build:node` | Node 버전을 `dist-node/`에 빌드(`node build.js`) |
 | `npm run db:reset` | 모든 테이블 삭제 후 스키마 재초기화 |
+
+---
+
+## 🌍 Cloudflare 외부에서 실행
+
+동일한 요청 핸들러는 Web 표준 `Request`/`Response` 시맨틱을 가진 모든 호스트에서 실행할 수 있습니다. Cloudflare 외부에는 D1 바인딩이 없으므로 PostgreSQL을 대신 사용합니다:
+
+- **Bun** : `bun run src/server.ts`
+- **Deno** : `deno run --allow-net --allow-read --allow-env src/server.ts`
+- **Node** : `node build.js`(또는 `npm run build:node`)로 프로젝트와 내장 Node 엔트리를 `dist-node/`에 컴파일한 뒤 `node dist-node/server-node.js` 실행
+- **클라우드 함수** : 공급업체 빌드 단계에서 `node build.js`를 실행하고 함수 엔트리를 `dist-node/server-node.js`로 지정
+
+실행 요구 사항(Cloudflare 외부에는 D1 바인딩 없음):
+
+```bash
+USE_D1=false                              # PostgreSQL 모드
+PG_ADDRS=postgres://user:pass@host:5432/dbname
+# 선택: STATIC_BASE=https://...           # 외부 서버에서 정적 자산 제공
+# 선택: PUBLIC_DIR=/path/to/public        # node 빌드: 로컬 정적 파일(기본 dist-node/public)
+# 선택: PORT=3000                         # node 빌드: 수신 포트
+# 선택: HOST=0.0.0.0                      # node 빌드: 바인드 주소
+```
 
 ---
 
@@ -174,6 +201,20 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 }
 ```
 
+### 189Cloud(天翼云盤)
+
+`addition` 예시:
+
+```json
+{
+  "username": "your-phone-number",
+  "password": "your-password",
+  "cookie": ""
+}
+```
+
+> 캡차 때문에 로그인할 수 없으면 `cookie` 필드에 로그인된 세션 쿠키를 입력하세요.
+
 ---
 
 ## 📡 API 참조
@@ -189,6 +230,10 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 | POST | `/api/auth/2fa/generate` | TOTP 시크릿 생성(`secret` + `qr` 반환) |
 | POST | `/api/auth/2fa/verify` | 코드 검증 및 2FA 활성화 |
 | POST | `/api/auth/2fa/disable` | 2FA 비활성화(유효한 코드 필요) |
+| GET | `/api/auth/sso` | SSO 로그인 리다이렉트(Github / Microsoft / Google / OIDC) |
+| GET | `/api/auth/sso_callback` | SSO 콜백 |
+| GET | `/api/auth/get_sso_id` | 현재 사용자의 SSO 식별 정보 조회 |
+| GET | `/api/auth/sso_get_token` | SSO 코드를 세션 토큰으로 교환 |
 
 ### 프로필
 
@@ -207,12 +252,23 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 | POST | `/api/fs/dirs` | 디렉터리 목록(`path`) |
 | POST | `/api/fs/mkdir` | 디렉터리 생성(`path`, `name`) |
 | POST | `/api/fs/rename` | 이름 변경(`path`, `name`) |
+| POST | `/api/fs/batch_rename` | 일괄 이름 변경 |
+| POST | `/api/fs/regex_rename` | 정규식 이름 변경 |
 | POST | `/api/fs/remove` | 삭제(`dir`, `names[]`) |
+| POST | `/api/fs/remove_empty_directory` | 빈 디렉터리 삭제 |
 | POST | `/api/fs/move` | 이동(`src_dir`, `dst_dir`, `names[]`) |
+| POST | `/api/fs/recursive_move` | 재귀 이동 |
 | POST | `/api/fs/copy` | 복사(`src_dir`, `dst_dir`, `names[]`) |
 | PUT | `/api/fs/put` | 업로드(`?path=` + 본문) |
 | PUT | `/api/fs/form` | 멀티파트 업로드 |
+| POST | `/api/fs/add_offline_download` | 오프라인 다운로드 작업 추가(aria2 / qBittorrent / Transmission) |
+| POST | `/api/fs/archive/meta` | 아카이브 메타데이터 조회(`path`) |
+| POST | `/api/fs/archive/list` | 아카이브 내 파일 목록(`path`, `inner`) |
+| POST | `/api/fs/archive/decompress` | 아카이브 압축 해제(`src_dir`, `dst_dir`, `names[]`) |
 | POST | `/api/fs/search` | 검색(스텁) |
+| POST | `/api/fs/other` | 기타 드라이버 작업(스텁) |
+| POST | `/api/fs/link` | 다운로드 링크 생성(`path`) |
+| POST | `/api/fs/get_direct_upload_info` | 직접 업로드 정보 조회 |
 
 ### 다운로드 / 프록시
 
@@ -220,6 +276,22 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 |---|---|---|
 | GET | `/d/<path>` | 서명된 다운로드 URL로 302 리다이렉트 |
 | GET/HEAD | `/p/<path>` | 워커를 통해 파일 스트리밍(Range 지원) |
+| GET | `/ad/<path>?inner=` | 아카이브 내 단일 파일 스트리밍 |
+| GET | `/ap/<path>?inner=` | 아카이브 내 단일 파일 프록시(Range 지원) |
+| GET | `/ae/<path>?inner=` | 아카이브 내 단일 항목 압축 해제(다운로드) |
+| GET | `/sd/<sid>/<path>` | 공유 파일 다운로드(비밀번호 공유는 `pwd`) |
+
+### 공유
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/share/list` | 공유 목록 |
+| GET | `/api/share/get?id=` | 공유 조회 |
+| POST | `/api/share/create` | 공유 생성(`files[]`, `expires`, `pwd`, `max_accessed` 등) |
+| POST | `/api/share/update` | 공유 업데이트 |
+| POST | `/api/share/delete?id=` | 공유 삭제 |
+| POST | `/api/share/enable?id=` | 공유 활성화 |
+| POST | `/api/share/disable?id=` | 공유 비활성화 |
 
 ### WebDAV
 
@@ -269,13 +341,35 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 | GET | `/api/admin/driver/list` | 드라이버 정보 맵 |
 | GET | `/api/admin/driver/info?driver=` | 단일 드라이버 정보 |
 
+### 관리 — 메타데이터(경로별)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/admin/meta/list` | 메타데이터 목록 |
+| GET | `/api/admin/meta/get?path=` | 경로의 메타데이터 조회 |
+| POST | `/api/admin/meta/create` | 메타데이터 생성(readme / header / 비밀번호 / 숨김 / 읽기-쓰기 사용자) |
+| POST | `/api/admin/meta/update` | 메타데이터 업데이트 |
+| POST | `/api/admin/meta/delete?path=` | 메타데이터 삭제 |
+
+### 작업(오프라인 다운로드, 전송 등)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/task/<type>/undone` | 미완료 작업 목록 |
+| GET | `/api/task/<type>/done` | 완료 작업 목록 |
+| GET | `/api/task/<type>/info?tid=` | 작업 상세 |
+| POST | `/api/task/<type>/cancel?tid=` | 작업 취소 |
+| POST | `/api/task/<type>/delete?tid=` | 작업 삭제 |
+| POST | `/api/task/<type>/retry?tid=` | 작업 재시도 |
+| POST | `/api/task/<type>/clear_done` | 완료 작업 지우기 |
+
 ### 공개
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/api/public/settings` | 공개 설정(사이트 제목, 로고, 파비콘 등) |
 | GET | `/api/public/archive_extensions` | 아카이브 확장자 |
-| GET | `/api/public/offline_download_tools` | 오프라인 다운로드 도구(스텁) |
+| GET | `/api/public/offline_download_tools` | 설정된 오프라인 다운로드 도구(aria2 / qBittorrent / Transmission) |
 
 ---
 
@@ -289,6 +383,9 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 | `favicon` | `/images/logo.png` | 파비콘 |
 | `max_connections` | `0` | 최대 연결 수(0 = 무제한) |
 | `cache_expiration` | `30` | 기본 캐시 수명(분) |
+| `aria2_uri` / `aria2_secret` | | aria2 RPC 엔드포인트 / 시크릿(오프라인 다운로드) |
+| `qbittorrent_url` / `qbittorrent_seedtime` | | qBittorrent Web API / 시드 시간(오프라인 다운로드) |
+| `transmission_uri` / `transmission_seedtime` | | Transmission RPC / 시드 시간(오프라인 다운로드) |
 
 > 익명 탐색은 사용자 목록의 **`guest` 사용자 계정**으로 제어합니다 — 기본적으로 비활성화되어 있습니다. 활성화하면 로그인 없이 탐색할 수 있습니다.
 
@@ -298,6 +395,12 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 
 ```
 src/
+├── db/                       # 클라우드 간 데이터베이스 계층(D1 / PostgreSQL / Hyperdrive)
+│   ├── types.ts              # 공유 Database 인터페이스(CF 전용 타입 없음)
+│   ├── d1.ts                 # D1 어댑터(Cloudflare)
+│   ├── postgres.ts           # PostgreSQL 어댑터(postgres.js, 클라우드 간)
+│   ├── sqlite.ts             # SQLite → PostgreSQL SQL 변환기
+│   └── index.ts              # createDatabase(env): USE_D1 / PG_ADDRS 전환
 ├── drivers/                  # 스토리지 드라이버
 │   ├── types.ts              # 핵심 드라이버 인터페이스
 │   ├── registry.ts           # 드라이버 등록 및 조회
@@ -307,30 +410,46 @@ src/
 │   ├── onedrive_app/         # OneDrive APP(Azure AD 앱) 드라이버
 │   ├── aliyundrive_open/     # Alibaba Cloud Drive 드라이버
 │   ├── pikpak/               # PikPak 드라이버
-│   └── dropbox/              # Dropbox 드라이버
+│   ├── dropbox/              # Dropbox 드라이버
+│   ├── cloud189/             # 189Cloud(天翼云盤) 드라이버
+│   ├── google_drive/         # Google Drive 드라이버
+│   ├── webdav/               # WebDAV 드라이버
+│   └── template.ts           # 복사용 드라이버 템플릿
 ├── models/
 │   ├── init.ts               # 스키마 초기화 및 기본 데이터
 │   └── schema.sql            # D1 스키마
 ├── routes/
 │   ├── api.ts                # API 라우터
 │   ├── auth.ts               # 인증 + 2FA + 프로필
-│   ├── fs.ts                 # 파일 시스템 라우트 + D1 캐시
-│   ├── download.ts           # /d/ 및 /p/ 다운로드 라우트
+│   ├── sso.ts                # SSO 로그인(Github / Microsoft / Google / OIDC)
+│   ├── fs.ts                 # 파일 시스템 라우트 + 데이터베이스 캐시
+│   ├── download.ts           # /d/, /p/ 및 아카이브 다운로드 라우트
+│   ├── share.ts              # 파일 공유 라우트
 │   ├── storage.ts            # 스토리지 관리 라우트
 │   ├── settings.ts           # 설정 관리 라우트
 │   ├── users.ts              # 사용자 관리 라우트
 │   ├── drivers.ts            # 드라이버 관리 라우트
+│   ├── meta.ts               # 경로별 메타데이터 관리 라우트
+│   ├── tasks.ts              # 작업 라우트(오프라인 다운로드, 전송 등)
 │   ├── refresh.ts            # 캐시 새로고침 라우트
+│   ├── webdav.ts             # WebDAV 라우트
 │   └── static.ts             # 정적 자산
 ├── utils/
 │   ├── otp.ts                # TOTP 구현
 │   ├── crypto.ts             # 비밀번호 해시 헬퍼
+│   ├── auth.ts               # 토큰 / 비밀번호 / 권한 헬퍼
+│   ├── sign.ts               # 다운로드 링크 서명
 │   ├── guest.ts              # 게스트 사용자 모델
-│   └── response.ts           # JSON 응답 헬퍼
-├── cache.ts                  # D1 캐시 프리미티브(파일, 링크, 잠금)
+│   ├── response.ts           # JSON 응답 헬퍼
+│   ├── meta.ts               # 경로별 메타데이터 헬퍼
+│   ├── archive.ts            # 아카이브 미리보기 / 압축 해제(zip / tar / gz)
+│   └── offline.ts            # 오프라인 다운로드(aria2 / qBittorrent / Transmission)
+├── cache.ts                  # 데이터베이스 캐시 프리미티브(파일, 링크, 잠금)
 ├── router.ts                 # 메인 라우터
 ├── types.ts                  # TypeScript 타입
-└── worker.ts                 # Worker 엔트리 포인트
+├── static-local.ts           # 로컬 정적 프로바이더(Bun / Deno, node 의존 없음)
+├── server.ts                 # 크로스플랫폼 엔트리(Bun / Deno)
+└── worker.ts                 # Worker 엔트리 포인트(Cloudflare)
 ```
 
 ### 새 스토리지 드라이버 추가
