@@ -305,17 +305,20 @@ export async function initializeDatabase(env: Env): Promise<void> {
       { key: 'transmission_uri', value: '', help: 'Transmission RPC URI', type: 'string', group: 5, flag: 1 },
       { key: 'transmission_seedtime', value: '0', help: 'Transmission seedtime (hours, 0 = keep forever)', type: 'number', group: 5, flag: 1 },
       // SSO
-      { key: 'sso_login_enabled', value: 'false', help: 'Enable SSO login', type: 'bool', group: 6 },
-      { key: 'sso_login_platform', value: '', help: 'SSO platform (Github, Microsoft, Google, OIDC)', type: 'select', group: 6, options: 'Github,Microsoft,Google,OIDC' },
-      { key: 'sso_client_id', value: '', help: 'SSO OAuth client ID', type: 'string', group: 6, flag: 1 },
-      { key: 'sso_client_secret', value: '', help: 'SSO OAuth client secret', type: 'string', group: 6, flag: 1 },
-      { key: 'sso_oidc_username_key', value: 'name', help: 'OIDC username claim key', type: 'string', group: 6 },
-      { key: 'sso_endpoint_name', value: '', help: 'OIDC issuer / Casdoor endpoint', type: 'string', group: 6 },
-      { key: 'sso_extra_scopes', value: '', help: 'Extra OIDC scopes (space separated)', type: 'string', group: 6 },
-      { key: 'sso_auto_register', value: 'true', help: 'Auto-register users on first SSO login', type: 'bool', group: 6 },
-      { key: 'sso_default_permission', value: '0', help: 'Default permission for auto-registered users', type: 'number', group: 6 },
-      { key: 'sso_default_dir', value: '/', help: 'Default base path for auto-registered users', type: 'string', group: 6 },
-      { key: 'sso_compatibility_mode', value: 'false', help: 'SSO compatibility mode', type: 'bool', group: 6 },
+      { key: 'sso_login_enabled', value: 'false', help: 'Enable SSO login', type: 'bool', group: 7 },
+      { key: 'sso_login_platform', value: '', help: 'SSO platform (Casdoor, Github, Microsoft, Google, Dingtalk, OIDC)', type: 'select', group: 7, options: 'Casdoor,Github,Microsoft,Google,Dingtalk,OIDC' },
+      { key: 'sso_client_id', value: '', help: 'SSO OAuth client ID', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_client_secret', value: '', help: 'SSO OAuth client secret', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_oidc_username_key', value: 'name', help: 'OIDC username claim key', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_organization_name', value: '', help: 'Casdoor organization name', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_application_name', value: '', help: 'Casdoor application name', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_endpoint_name', value: '', help: 'OIDC issuer / Casdoor endpoint', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_jwt_public_key', value: '', help: 'OIDC JWT public key', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_extra_scopes', value: '', help: 'Extra OIDC scopes (space separated)', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_auto_register', value: 'false', help: 'Auto-register users on first SSO login', type: 'bool', group: 7, flag: 1 },
+      { key: 'sso_default_permission', value: '0', help: 'Default permission for auto-registered users', type: 'number', group: 7, flag: 1 },
+      { key: 'sso_default_dir', value: '/', help: 'Default base path for auto-registered users', type: 'string', group: 7, flag: 1 },
+      { key: 'sso_compatibility_mode', value: 'false', help: 'SSO compatibility mode', type: 'bool', group: 7 },
     ];
 
     for (const setting of defaultSettings) {
@@ -328,6 +331,47 @@ export async function initializeDatabase(env: Env): Promise<void> {
           'INSERT INTO settings (key, value, help, type, options, group_id, flag) VALUES (?, ?, ?, ?, ?, ?, ?)'
         ).bind(setting.key, setting.value, setting.help, setting.type, setting.options || '', setting.group, setting.flag || 0).run();
       }
+    }
+
+    // Migration: SSO settings belong to group 7 (SSO), not group 6 (INDEX).
+    // Databases initialized before this fix stored them under group_id=6,
+    // which made the frontend render them on the @manage/indexes page.
+    try {
+      await env.DB.prepare(
+        "UPDATE settings SET group_id = 7 WHERE key LIKE 'sso_%'"
+      ).run();
+    } catch {
+      // ignore
+    }
+
+    // Migration: add missing SSO settings (Casdoor / Dingtalk support) and
+    // align visibility flags with the official OpenList (secrets stay private).
+    const ssoExtra: Array<[string, string, string, string, number]> = [
+      ['sso_organization_name', '', 'Casdoor organization name', 'string', 1],
+      ['sso_application_name', '', 'Casdoor application name', 'string', 1],
+      ['sso_jwt_public_key', '', 'OIDC JWT public key', 'string', 1],
+    ];
+    for (const [key, value, help, type, flag] of ssoExtra) {
+      try {
+        const existing = await env.DB.prepare('SELECT key FROM settings WHERE key = ?').bind(key).first();
+        if (!existing) {
+          await env.DB.prepare(
+            'INSERT INTO settings (key, value, help, type, options, group_id, flag) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          ).bind(key, value, help, type, '', 7, flag).run();
+        }
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      await env.DB.prepare(
+        "UPDATE settings SET flag = 1 WHERE key IN ('sso_client_id','sso_client_secret','sso_oidc_username_key','sso_organization_name','sso_application_name','sso_endpoint_name','sso_jwt_public_key','sso_extra_scopes','sso_auto_register','sso_default_dir','sso_default_permission')"
+      ).run();
+      await env.DB.prepare(
+        "UPDATE settings SET options = 'Casdoor,Github,Microsoft,Google,Dingtalk,OIDC' WHERE key = 'sso_login_platform'"
+      ).run();
+    } catch {
+      // ignore
     }
 
     // Insert the private `token` setting (secret for token/sign HMAC).

@@ -46,7 +46,7 @@ async function getSsoConfig(env: Env): Promise<SsoConfig> {
     oidcUsernameKey: await get('sso_oidc_username_key', 'name'),
     endpoint: await get('sso_endpoint_name', ''),
     extraScopes: await get('sso_extra_scopes', ''),
-    autoRegister: (await get('sso_auto_register', 'true')) === 'true',
+    autoRegister: (await get('sso_auto_register', 'false')) === 'true',
     defaultPermission: parseInt(await get('sso_default_permission', '0')) || 0,
     defaultDir: await get('sso_default_dir', '/'),
     compatibility: (await get('sso_compatibility_mode', 'false')) === 'true',
@@ -97,6 +97,14 @@ interface PlatformDef {
   idField: string;
   usernameField: string;
   useBearer: boolean; // token in Authorization: Bearer vs custom header
+  /** Extra authorize query params (e.g. Dingtalk prompt=consent). */
+  prompt?: string;
+  /** Exchange the code via a JSON body instead of a form (Dingtalk). */
+  jsonToken?: boolean;
+  /** Header that carries the access token on the user request (Dingtalk). */
+  tokenHeader?: string;
+  /** Field name of the access token in the token response (default access_token). */
+  accessField?: string;
 }
 
 function getPlatformDef(platform: string, config: SsoConfig): PlatformDef | null {
@@ -107,9 +115,33 @@ function getPlatformDef(platform: string, config: SsoConfig): PlatformDef | null
       return { authorizeUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize', tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token', userUrl: 'https://graph.microsoft.com/v1.0/me', scope: 'user.read', authField: 'code', idField: 'id', usernameField: 'displayName', useBearer: true };
     case 'Google':
       return { authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth', tokenUrl: 'https://oauth2.googleapis.com/token', userUrl: 'https://www.googleapis.com/oauth2/v1/userinfo', scope: 'https://www.googleapis.com/auth/userinfo.profile', authField: 'code', idField: 'id', usernameField: 'name', useBearer: true };
+    case 'Dingtalk':
+      return { authorizeUrl: 'https://login.dingtalk.com/oauth2/auth', tokenUrl: 'https://api.dingtalk.com/v1.0/oauth2/userAccessToken', userUrl: 'https://api.dingtalk.com/v1.0/contact/users/me', scope: 'openid', authField: 'authCode', idField: 'unionId', usernameField: 'nick', useBearer: true, prompt: 'consent', jsonToken: true, tokenHeader: 'x-acs-dingtalk-access-token', accessField: 'accessToken' };
+    case 'Casdoor': {
+      const endpoint = (config.endpoint || '').replace(/\/$/, '');
+      if (!endpoint) return null;
+      return { authorizeUrl: `${endpoint}/login/oauth/authorize`, tokenUrl: `${endpoint}/api/login/oauth/access_token`, userUrl: `${endpoint}/api/userinfo`, scope: 'profile', authField: 'code', idField: 'sub', usernameField: 'preferred_username', useBearer: true };
+    }
     default:
       return null;
   }
+}
+
+/**
+ * Resolve the actual OAuth provider.
+ *
+ * The `method` query param is an *intent* marker, not the provider: the
+ * frontend always opens `/api/auth/sso?method=sso_get_token` (or
+ * `get_sso_id`), and these values flow through the redirect_uri to the
+ * callback so the backend knows what to hand back. The provider itself is the
+ * configured `sso_login_platform`. When `method` is an explicit platform name
+ * it is used as an override (backwards compatible with older clients).
+ */
+function resolvePlatform(method: string, config: SsoConfig): string {
+  if (method === 'Github' || method === 'Microsoft' || method === 'Google' || method === 'Dingtalk' || method === 'Casdoor' || method === 'OIDC') {
+    return method;
+  }
+  return config.platform;
 }
 
 function redirectUri(origin: string, method: string, compatibility: boolean): string {
@@ -133,7 +165,7 @@ export async function handleSsoRequest(request: Request, env: Env): Promise<Resp
   const path = url.pathname;
   const config = await getSsoConfig(env);
 
-  // /api/auth/sso?method=<platform> -> redirect to provider
+  // /api/auth/sso?method=<intent> -> redirect to provider
   if (path === '/api/auth/sso' && request.method === 'GET') {
     if (!config.enabled) {
       return jsonResponse({ code: 403, message: 'Single sign-on is not enabled' }, 403);
@@ -142,14 +174,18 @@ export async function handleSsoRequest(request: Request, env: Env): Promise<Resp
     if (!method) {
       return jsonResponse({ code: 400, message: 'no method provided' }, 400);
     }
-    if (method === 'OIDC') {
-      return oidcRedirect(request, env, config);
+    // The provider is the configured platform; `method` is the intent marker
+    // (sso_get_token / get_sso_id) carried through the redirect_uri.
+    const platform = resolvePlatform(method, config);
+    if (platform === 'OIDC') {
+      return oidcRedirect(request, env, config, method);
     }
-    const def = getPlatformDef(method, config);
+    const def = getPlatformDef(platform, config);
     if (!def) {
       return jsonResponse({ code: 400, message: 'invalid platform' }, 400);
     }
-    const state = randomSalt(16);
+    // Casdoor uses the endpoint itself as the OAuth state (matches OpenList).
+    const state = platform === 'Casdoor' ? (config.endpoint || '').replace(/\/$/, '') : randomSalt(16);
     await saveState(state, env);
     const redirect = redirectUri(url.origin, method, config.compatibility);
     const params = new URLSearchParams({
@@ -159,7 +195,8 @@ export async function handleSsoRequest(request: Request, env: Env): Promise<Resp
       scope: def.scope,
       state,
     });
-    if (method === 'Microsoft') params.set('response_mode', 'query');
+    if (platform === 'Microsoft') params.set('response_mode', 'query');
+    if (def.prompt) params.set('prompt', def.prompt);
     return Response.redirect(`${def.authorizeUrl}?${params.toString()}`, 302);
   }
 
@@ -175,22 +212,19 @@ export async function handleSsoRequest(request: Request, env: Env): Promise<Resp
     if (config.compatibility) {
       method = path.split('/').pop() || '';
     }
-    if (method === 'get_sso_id') method = 'get_sso_id';
-    if (method === 'sso_get_token') method = 'sso_get_token';
-
-    // get_sso_id / sso_get_token are pseudo-methods of the SSO callback.
-    if (method === 'OIDC') {
-      return oidcCallback(request, env, config);
+    const platform = resolvePlatform(method, config);
+    if (platform === 'OIDC') {
+      return oidcCallback(request, env, config, method);
     }
-    return platformCallback(request, env, config, method);
+    return platformCallback(request, env, config, method, platform);
   }
 
   return jsonResponse({ code: 404, message: 'Not Found' }, 404);
 }
 
-async function platformCallback(request: Request, env: Env, config: SsoConfig, method: string): Promise<Response> {
+async function platformCallback(request: Request, env: Env, config: SsoConfig, method: string, platform: string): Promise<Response> {
   const url = new URL(request.url);
-  const def = getPlatformDef(method, config);
+  const def = getPlatformDef(platform, config);
   if (!def) {
     return jsonResponse({ code: 400, message: 'invalid platform' }, 400);
   }
@@ -200,30 +234,58 @@ async function platformCallback(request: Request, env: Env, config: SsoConfig, m
     return jsonResponse({ code: 400, message: 'No code provided' }, 400);
   }
 
-  // Exchange the code for an access token.
-  const form = new URLSearchParams({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    code,
-    redirect_uri: redirectUri(url.origin, method, config.compatibility),
-    scope: def.scope,
-  });
-  if (method === 'Microsoft' || method === 'Google') form.set('grant_type', 'authorization_code');
-
-  const tokenResp = await fetch(def.tokenUrl, {
-    method: 'POST',
-    headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form.toString(),
-  });
-  const tokenBody: any = await tokenResp.json().catch(() => ({}));
-  if (!tokenResp.ok || !tokenBody.access_token) {
-    return jsonResponse({ code: 400, message: 'Failed to exchange code' }, 400);
+  // Exchange the code for an access token. The redirect_uri must match the one
+  // used in the authorize step (it carries the `method` intent marker).
+  // Dingtalk exchanges the code with a JSON body and returns `accessToken`;
+  // the other platforms use a form and return `access_token`.
+  let accessToken = '';
+  if (def.jsonToken) {
+    const tokenResp = await fetch(def.tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        code,
+        grantType: 'authorization_code',
+      }),
+    });
+    const tokenBody: any = await tokenResp.json().catch(() => ({}));
+    accessToken = tokenBody[def.accessField || 'accessToken'] || '';
+    if (!tokenResp.ok || !accessToken) {
+      return jsonResponse({ code: 400, message: 'Failed to exchange code' }, 400);
+    }
+  } else {
+    const form = new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code,
+      redirect_uri: redirectUri(url.origin, method, config.compatibility),
+      scope: def.scope,
+    });
+    if (platform === 'Microsoft' || platform === 'Google' || platform === 'Casdoor') form.set('grant_type', 'authorization_code');
+    const tokenResp = await fetch(def.tokenUrl, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const tokenBody: any = await tokenResp.json().catch(() => ({}));
+    accessToken = tokenBody.access_token || '';
+    if (!tokenResp.ok || !accessToken) {
+      return jsonResponse({ code: 400, message: 'Failed to exchange code' }, 400);
+    }
   }
 
-  // Fetch the user profile.
+  // Fetch the user profile. Dingtalk carries the token in a custom header.
+  const userHeaders: Record<string, string> = { 'Accept': 'application/json' };
+  if (def.tokenHeader) {
+    userHeaders[def.tokenHeader] = accessToken;
+  } else {
+    userHeaders['Authorization'] = `Bearer ${accessToken}`;
+  }
   const userResp = await fetch(def.userUrl, {
     method: 'GET',
-    headers: { 'Authorization': `Bearer ${tokenBody.access_token}`, 'Accept': 'application/json' },
+    headers: userHeaders,
   });
   const userBody: any = await userResp.json().catch(() => ({}));
   if (!userResp.ok) {
@@ -308,7 +370,7 @@ async function discoverOidc(config: SsoConfig): Promise<OidcDiscovery | null> {
   };
 }
 
-async function oidcRedirect(request: Request, env: Env, config: SsoConfig): Promise<Response> {
+async function oidcRedirect(request: Request, env: Env, config: SsoConfig, method: string): Promise<Response> {
   const discovery = await discoverOidc(config);
   if (!discovery) {
     return jsonResponse({ code: 400, message: 'OIDC discovery failed' }, 400);
@@ -319,7 +381,7 @@ async function oidcRedirect(request: Request, env: Env, config: SsoConfig): Prom
   const scopes = ['openid', 'profile', ...(config.extraScopes ? config.extraScopes.split(' ').filter(Boolean) : [])];
   const params = new URLSearchParams({
     response_type: 'code',
-    redirect_uri: redirectUri(url.origin, 'OIDC', config.compatibility),
+    redirect_uri: redirectUri(url.origin, method, config.compatibility),
     client_id: config.clientId,
     scope: scopes.join(' '),
     state,
@@ -327,7 +389,7 @@ async function oidcRedirect(request: Request, env: Env, config: SsoConfig): Prom
   return Response.redirect(`${discovery.authorization_endpoint}?${params.toString()}`, 302);
 }
 
-async function oidcCallback(request: Request, env: Env, config: SsoConfig): Promise<Response> {
+async function oidcCallback(request: Request, env: Env, config: SsoConfig, method: string): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get('code') || '';
   const state = url.searchParams.get('state') || '';
@@ -342,7 +404,7 @@ async function oidcCallback(request: Request, env: Env, config: SsoConfig): Prom
   const form = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: redirectUri(url.origin, 'OIDC', config.compatibility),
+    redirect_uri: redirectUri(url.origin, method, config.compatibility),
     client_id: config.clientId,
     client_secret: config.clientSecret,
   });
@@ -377,7 +439,6 @@ async function oidcCallback(request: Request, env: Env, config: SsoConfig): Prom
     return jsonResponse({ code: 400, message: 'cannot get username from OIDC provider' }, 400);
   }
 
-  const method = url.searchParams.get('method') || 'sso_get_token';
   if (method === 'get_sso_id') {
     if (config.compatibility) {
       return Response.redirect(`${url.origin}/@manage?sso_id=${encodeURIComponent(userId)}`, 302);
