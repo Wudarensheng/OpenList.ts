@@ -78,6 +78,9 @@ async function ensureDrivers(): Promise<void> {
     cloud189Mod,
     webdavMod,
     googleDriveMod,
+    yandexDiskMod,
+    open123Mod,
+    quarkOpenMod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -88,6 +91,9 @@ async function ensureDrivers(): Promise<void> {
     import('./cloud189'),
     import('./webdav'),
     import('./google_drive'),
+    import('./yandex_disk'),
+    import('./123_open'),
+    import('./quark_open'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -100,6 +106,9 @@ async function ensureDrivers(): Promise<void> {
   if (cloud189Mod.cloud189Config) registerDriver(cloud189Mod.Cloud189Driver, cloud189Mod.cloud189Config, cloud189Mod.cloud189Additional);
   if (webdavMod.webdavConfig) registerDriver(webdavMod.WebDavDriver, webdavMod.webdavConfig, webdavMod.webdavAdditional);
   if (googleDriveMod.googleDriveConfig) registerDriver(googleDriveMod.GoogleDriveDriver, googleDriveMod.googleDriveConfig, googleDriveMod.googleDriveAdditional);
+  if (yandexDiskMod.yandexDiskConfig) registerDriver(yandexDiskMod.YandexDiskDriver, yandexDiskMod.yandexDiskConfig, yandexDiskMod.yandexDiskAdditional);
+  if (open123Mod.open123Config) registerDriver(open123Mod.Open123Driver, open123Mod.open123Config, open123Mod.open123Additional);
+  if (quarkOpenMod.quarkOpenConfig) registerDriver(quarkOpenMod.QuarkOpenDriver, quarkOpenMod.quarkOpenConfig, quarkOpenMod.quarkOpenAdditional);
 }
 
 /**
