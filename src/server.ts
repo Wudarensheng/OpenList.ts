@@ -19,6 +19,7 @@
 import { createDatabase } from './db';
 import { handleRequest } from './router';
 import { createLocalAssets } from './static-local';
+import { initializeDatabase } from './models/init';
 import type { ContextLike } from './types';
 
 function readEnv(name: string): string | undefined {
@@ -53,6 +54,12 @@ export async function main(): Promise<void> {
     STATIC_BASE: readEnv('STATIC_BASE'),
     LOCAL_STATIC: createLocalAssets('public'),
   } as any;
+
+  // Create tables / seed default data (same as the Worker entry). Without this
+  // the PostgreSQL database is only connected but never initialized, so every
+  // query fails on missing tables.
+  await initializeDatabase(env);
+  console.log('[openlist-ts] database initialized');
 
   const handleFetch = (request: Request) => handleRequest(request, env, {} as ContextLike);
 
