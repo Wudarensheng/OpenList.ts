@@ -97,6 +97,11 @@ export class PostgresAdapter implements Database {
     this.sql = postgres(connectionString, {
       max: 1,
       prepare: false, // required in serverless / multi-isolate environments
+      // Fail fast instead of hanging: without this, a dropped/unreachable
+      // network path keeps postgres.js retrying and serverless platforms
+      // (e.g. EdgeOne Cloud Functions with maxDuration 60s) kill the function
+      // with an opaque "invocation timeout". 10s surfaces a real CONNECT_TIMEOUT.
+      connect_timeout: 10,
       // int8 (OID 20, e.g. COUNT(*)) arrives as a string by default; normalize
       // to number so `(countRow as any)?.total || 0` keeps working.
       types: {
