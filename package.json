@@ -7,6 +7,7 @@
     "dev": "wrangler dev -c wrangler.local.toml",
     "deploy": "wrangler deploy",
     "start": "bun run src/server.ts",
+    "build:node": "node build.js",
     "test": "vitest run",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",

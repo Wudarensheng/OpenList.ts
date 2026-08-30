@@ -1,5 +1,8 @@
 node_modules/
 dist/
+dist-node/
+# Transient node entry written by build.js during `node build.js`
+src/server-node.ts
 tmp/
 .wrangler/
 .dev.vars
