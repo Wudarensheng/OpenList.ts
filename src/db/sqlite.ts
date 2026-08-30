@@ -90,7 +90,17 @@ function replaceInsertOrIgnore(sql: string): string {
 }
 
 function replaceAutoincrement(sql: string): string {
-  return sql.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+  return sql.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'BIGSERIAL PRIMARY KEY');
+}
+
+// SQLite INTEGER is signed 64-bit, but PostgreSQL INTEGER is only 32-bit.
+// Map remaining DDL `INTEGER` columns to BIGINT so 64-bit values (e.g. the
+// 0xFFFFFFFF admin permission bitmask) do not overflow. Runs after
+// replaceAutoincrement, so the BIGSERIAL primary key is left untouched.
+// Only DDL is rewritten — column types never appear in DML.
+function replaceDdlInteger(sql: string): string {
+  if (!/^\s*(CREATE\s+TABLE|ALTER\s+TABLE)/i.test(sql)) return sql;
+  return sql.replace(/\bINTEGER\b/gi, 'BIGINT');
 }
 
 // Append ` RETURNING <pk>` so `result.meta.last_row_id` can be populated.
@@ -148,6 +158,7 @@ export function toPostgresSql(sql: string): string {
   out = replaceInsertOrReplace(out);
   out = replaceInsertOrIgnore(out);
   out = replaceAutoincrement(out);
+  out = replaceDdlInteger(out);
   out = appendReturning(out);
   out = replacePlaceholders(out);
   return out;
