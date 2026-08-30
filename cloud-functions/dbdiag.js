@@ -20,6 +20,13 @@ try {
   // postgres 未安装时跳过数据库协议测试
 }
 
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(label + ' TIMEOUT ' + ms + 'ms')), ms)),
+  ]);
+}
+
 function parsePg(urlStr) {
   try {
     const u = new URL(urlStr);
@@ -109,6 +116,21 @@ export default async function onRequest(context) {
                 "SELECT count(*)::int AS tables FROM information_schema.tables WHERE table_schema = 'public'"
               );
               out.details.pgTables = t2;
+
+              // 带参数的查询（走 extended protocol + Describe）——这是应用实际使用的路径
+              const t0 = Date.now();
+              const t3 = await withTimeout(
+                sql.unsafe('SELECT 1 AS ok WHERE $1::int = 1', [1]),
+                15000, 'pgParam'
+              );
+              out.details.pgParamMs = Date.now() - t0;
+              out.details.pgParam = t3;
+              const t4 = await withTimeout(
+                sql.unsafe('SELECT key, value FROM settings WHERE flag = $1::int LIMIT 1', [0]),
+                15000, 'pgSettings'
+              );
+              out.details.pgSettingsQuery = t4;
+
               out.ok = true;
               out.step = 'done';
               out.error = '数据库查询成功，public schema 下表数量: ' + (t2 && t2[0] && t2[0].tables);
