@@ -1,12 +1,10 @@
 # OpenList.ts
 
-[![部署到 Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
-
 [English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
-一个基于 [Cloudflare Workers](https://workers.cloudflare.com/) 的文件列表程序 —— 采用 OpenList/AList 风格网页界面，可浏览和管理 S3 兼容存储（Backblaze B2、Cloudflare R2、AWS S3、MinIO 等）、Microsoft OneDrive、OneDrive APP、阿里云盘、PikPak、Dropbox 和天翼云盘（189Cloud）上的文件。
+一个**跨云原生**的文件列表程序 —— 采用 OpenList/AList 风格网页界面，可浏览和管理 S3 兼容存储（Backblaze B2、Cloudflare R2、AWS S3、MinIO 等）、Microsoft OneDrive、OneDrive APP、阿里云盘、PikPak、Dropbox 和天翼云盘（189Cloud）上的文件。基于 Web 标准 API 编写，可一键部署到 Cloudflare Workers、Netlify、Vercel、EdgeOne，也能在任意 Node / Bun / Deno 平台上运行。
 
-全部使用 TypeScript 编写，默认运行在 Workers 运行时上，文件树和下载链接缓存存储在 [Cloudflare D1](https://developers.cloudflare.com/d1/) 中。数据库层是跨云的 —— 设置 `USE_D1=false` 时改用 PostgreSQL（Cloudflare 上走 [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) 绑定，或直接使用 `PG_ADDRS` 连接串）；同一套请求处理逻辑也可以在 Cloudflare 之外的 Bun / Deno / Node 上运行（见[在 Cloudflare 之外运行](#-在-cloudflare-之外运行)）。
+全部使用 TypeScript 编写，基于 Web 标准 API（`Request` / `Response`），**跨云原生**、不绑定特定云厂商。文件树与下载链接缓存默认存储在 [Cloudflare D1](https://developers.cloudflare.com/d1/) 中，也可使用 PostgreSQL（设置 `USE_D1=false` 后，Cloudflare 上走 [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) 绑定，其他平台用 `PG_ADDRS` 连接串）；同一套请求处理逻辑可运行在 Cloudflare Workers、Netlify、Vercel、EdgeOne 以及任意 Node / Bun / Deno 平台上（见[跨平台运行](#-跨平台运行)）。
 
 > **OpenList.ts** 是 OpenList 生态项目及衍生项目，属于 OpenList 生态。
 
@@ -14,8 +12,8 @@
 
 ## ✨ 功能特性
 
-- ☁️ 默认完全运行在 Cloudflare Workers + D1 上（无需 VPS）
-- 🌍 **跨云与跨平台**：数据库层支持 D1 或 PostgreSQL（Hyperdrive / `PG_ADDRS`）；同一套请求处理逻辑可在 Cloudflare 之外的 Bun / Deno / Node 上运行
+- ☁️ **跨云原生**（无需 VPS）：一键部署到 Cloudflare Workers、Netlify、Vercel、EdgeOne，或运行在任意 Node / Bun / Deno 平台
+- 🌍 **跨云数据库**：存储层支持 D1 或 PostgreSQL（Hyperdrive / `PG_ADDRS`），同一套请求处理逻辑在各类平台上保持一致
 - 📁 多存储支持：**S3 兼容**（B2 / R2 / AWS / MinIO）、**OneDrive**、**OneDrive APP**、**阿里云盘**、**PikPak**、**Dropbox**、**天翼云盘（189Cloud）**
 - 🗄️ **文件树缓存**：浏览时从数据库读取缓存的文件树 —— 仅当管理员访问冷路径时才联系存储提供商，下载链接在下载时才按需生成
 - 🔐 用户认证与授权（访客 / 普通用户 / 管理员）
@@ -34,11 +32,18 @@
 
 ## 🚀 快速部署
 
+**跨云原生**，按需选择任意平台一键部署：
+
 [![部署到 Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
+[![部署到 Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/Wudarensheng/OpenList.ts)
+[![部署到 Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Wudarensheng/OpenList.ts)
+[![部署到 EdgeOne（国内站）](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
+[![部署到 EdgeOne（国际站）](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
 
-点击上方按钮即可直接部署到你的 Cloudflare 账户（会自动创建 Workers 和 D1）。部署完成后打开 Worker 地址，使用默认凭据登录，然后在管理面板中添加存储。
+> - **Cloudflare Workers**：一键创建 Workers + D1，部署完成后打开 Worker 地址，使用默认凭据登录，然后在管理面板中添加存储。
+> - **Netlify / Vercel / EdgeOne / 自托管**：这些平台没有 D1 绑定，需要配置 `USE_D1=false` 与 `PG_ADDRS` 环境变量（PostgreSQL），并选择 Node 入口（`node build.js` 生成的 `dist-node/server-node.js`）。
 
-### 手动部署
+### 手动部署到 Cloudflare
 
 前置要求：[Node.js](https://nodejs.org/) 18+ 和 [Wrangler](https://developers.cloudflare.com/workers/wrangler/)。
 
@@ -87,16 +92,16 @@ D1 数据库在本地 `.wrangler/state` 下模拟，schema 和缓存数据重启
 
 ---
 
-## 🌍 在 Cloudflare 之外运行
+## 🌍 跨平台运行
 
-同一套请求处理逻辑可以在任何支持 Web 标准 `Request`/`Response` 语义的平台上运行。由于 Cloudflare 之外没有 D1 绑定，改用 PostgreSQL：
+同一套请求处理逻辑可以在任何支持 Web 标准 `Request`/`Response` 语义的平台上运行（Netlify / Vercel / EdgeOne 等函数平台，或自托管的 Node / Bun / Deno）。这些平台没有 D1 绑定，数据库改用 PostgreSQL：
 
 - **Bun**：`bun run src/server.ts`
 - **Deno**：`deno run --allow-net --allow-read --allow-env src/server.ts`
 - **Node**：`node build.js`（或 `npm run build:node`）会把项目与内嵌的 Node 入口编译到 `dist-node/`，然后 `node dist-node/server-node.js`
 - **云函数**：在厂商构建步骤中运行 `node build.js`，并将函数入口指向 `dist-node/server-node.js`
 
-运行要求（Cloudflare 之外没有 D1 绑定）：
+运行要求（无 D1 绑定的平台）：
 
 ```bash
 USE_D1=false                              # PostgreSQL 模式

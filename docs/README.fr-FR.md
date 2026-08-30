@@ -1,12 +1,10 @@
 # OpenList.ts
 
-[![Déployer sur Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
-
 [English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
-Un programme de listage de fichiers pour [Cloudflare Workers](https://workers.cloudflare.com/) — une interface web de type OpenList/AList qui parcourt et gère des fichiers sur le stockage compatible S3 (Backblaze B2, Cloudflare R2, AWS S3, MinIO, …), Microsoft OneDrive, OneDrive APP, Alibaba Cloud Drive, PikPak, Dropbox et 189Cloud (天翼云盤).
+Un programme de listage de fichiers **natif multi-cloud** — une interface web de type OpenList/AList qui parcourt et gère des fichiers sur le stockage compatible S3 (Backblaze B2, Cloudflare R2, AWS S3, MinIO, …), Microsoft OneDrive, OneDrive APP, Alibaba Cloud Drive, PikPak, Dropbox et 189Cloud (天翼云盤). Écrit sur des API Web standards, il peut être déployé en un clic sur Cloudflare Workers, Netlify, Vercel et EdgeOne, et fonctionne aussi sur n'importe quelle plateforme Node / Bun / Deno.
 
-Le tout est écrit en TypeScript, fonctionne par défaut sur le runtime Workers et stocke l'arborescence des fichiers et les liens de téléchargement dans [Cloudflare D1](https://developers.cloudflare.com/d1/). La couche de base de données est multi-cloud — avec `USE_D1=false` elle utilise PostgreSQL à la place (une liaison [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) sur Cloudflare, ou une simple chaîne de connexion `PG_ADDRS`) — et le même gestionnaire de requêtes peut aussi fonctionner hors de Cloudflare sur Bun, Deno ou Node (voir [Exécution hors de Cloudflare](#-exécution-hors-de-cloudflare)).
+Le tout est écrit en TypeScript, basé sur les API Web standards (`Request` / `Response`), **natif multi-cloud** et non lié à un fournisseur cloud spécifique. L'arborescence et le cache des liens de téléchargement utilisent par défaut [Cloudflare D1](https://developers.cloudflare.com/d1/), ou PostgreSQL (avec `USE_D1=false` ; une liaison [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) sur Cloudflare, ou une chaîne `PG_ADDRS` ailleurs). Le même gestionnaire de requêtes fonctionne sur Cloudflare Workers, Netlify, Vercel, EdgeOne et toute plateforme Node / Bun / Deno (voir [Exécution multi-plateforme](#-exécution-multi-plateforme)).
 
 > **OpenList.ts** est un projet de l'écosystème OpenList et un dérivé d'OpenList, faisant partie de l'écosystème OpenList.
 
@@ -14,8 +12,8 @@ Le tout est écrit en TypeScript, fonctionne par défaut sur le runtime Workers 
 
 ## ✨ Fonctionnalités
 
-- ☁️ Fonctionne entièrement sur Cloudflare Workers + D1 par défaut (aucun VPS requis)
-- 🌍 **Multi-cloud & multi-plateforme** : la base de données supporte D1 ou PostgreSQL (Hyperdrive / `PG_ADDRS`) ; le même gestionnaire de requêtes fonctionne sur Bun / Deno / Node hors de Cloudflare
+- ☁️ **Natif multi-cloud** (aucun VPS requis) : déploiement en un clic vers Cloudflare Workers, Netlify, Vercel, EdgeOne, ou exécution sur toute plateforme Node / Bun / Deno
+- 🌍 **Base de données multi-cloud** : stockage D1 ou PostgreSQL (Hyperdrive / `PG_ADDRS`), avec un traitement des requêtes cohérent sur toutes les plateformes
 - 📁 Multi-stockage : **compatible S3** (B2 / R2 / AWS / MinIO), **OneDrive**, **OneDrive APP**, **Alibaba Cloud Drive**, **PikPak**, **Dropbox**, **189Cloud (天翼云盤)**
 - 🗄️ **Cache d'arborescence** : la navigation lit l'arborescence depuis la base de données — le fournisseur de stockage n'est contacté que lorsqu'un administrateur visite un chemin à froid, et les URLs de téléchargement sont générées à la demande
 - 🔐 Authentification et autorisation (invité / utilisateur / administrateur)
@@ -34,11 +32,18 @@ Le tout est écrit en TypeScript, fonctionne par défaut sur le runtime Workers 
 
 ## 🚀 Déploiement rapide
 
+**Natif multi-cloud** — choisissez une plateforme et déployez en un clic :
+
 [![Déployer sur Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
+[![Déployer sur Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/Wudarensheng/OpenList.ts)
+[![Déployer avec Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Wudarensheng/OpenList.ts)
+[![Déployer sur EdgeOne (Chine)](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
+[![Déployer sur EdgeOne (International)](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
 
-Cliquez sur le bouton ci-dessus pour déployer directement sur votre compte Cloudflare (Workers + D1 sont créés automatiquement). Après le déploiement, ouvrez l'URL de votre Worker, connectez-vous avec les identifiants par défaut, puis ajoutez un stockage dans le panneau d'administration.
+> - **Cloudflare Workers** : crée Workers + D1 en un clic. Après le déploiement, ouvrez l'URL de votre Worker, connectez-vous avec les identifiants par défaut, puis ajoutez un stockage dans le panneau d'administration.
+> - **Netlify / Vercel / EdgeOne / auto-hébergé** : ces plateformes n'ont pas de liaison D1 — configurez les variables d'environnement `USE_D1=false` et `PG_ADDRS` (PostgreSQL) et utilisez l'entrée Node (`dist-node/server-node.js` produite par `node build.js`).
 
-### Déploiement manuel
+### Déploiement manuel vers Cloudflare
 
 Prérequis : [Node.js](https://nodejs.org/) 18+ et [Wrangler](https://developers.cloudflare.com/workers/wrangler/).
 
@@ -87,16 +92,16 @@ Autres scripts utiles :
 
 ---
 
-## 🌍 Exécution hors de Cloudflare
+## 🌍 Exécution multi-plateforme
 
-Le même gestionnaire de requêtes peut fonctionner sur n'importe quel hôte avec des sémantiques Web standard `Request`/`Response`. Comme il n'y a pas de liaison D1 hors de Cloudflare, PostgreSQL est utilisé à la place :
+Le même gestionnaire de requêtes peut fonctionner sur n'importe quel hôte avec des sémantiques Web standard `Request`/`Response` (plateformes de fonctions comme Netlify / Vercel / EdgeOne, ou auto-hébergé avec Node / Bun / Deno). Ces plateformes n'ont pas de liaison D1, donc PostgreSQL est utilisé à la place :
 
 - **Bun** : `bun run src/server.ts`
 - **Deno** : `deno run --allow-net --allow-read --allow-env src/server.ts`
 - **Node** : `node build.js` (ou `npm run build:node`) compile le projet et l'entrée Node intégrée vers `dist-node/`, puis `node dist-node/server-node.js`
 - **Fonctions cloud** : exécutez `node build.js` comme étape de build du fournisseur et pointez l'entrée de la fonction vers `dist-node/server-node.js`
 
-Exigences (pas de liaison D1 hors de Cloudflare) :
+Exigences (plateformes sans liaison D1) :
 
 ```bash
 USE_D1=false                              # Mode PostgreSQL
@@ -299,6 +304,21 @@ Exemple `addition` :
 
 Montez vos drives cloud en dossier local via le protocole WebDAV standard sur `/dav/`. Méthodes supportées :
 `PROPFIND`, `GET`, `HEAD`, `PUT`, `MKCOL`, `DELETE`, `MOVE`, `COPY`, `LOCK`, `UNLOCK`, `OPTIONS`.
+
+**Windows (Explorateur) :**
+1. Clic droit sur « Ce PC » → **Mapper un lecteur réseau**.
+2. Dossier : `http://<votre-worker>/dav/`.
+3. Cochez « Se connecter avec des informations d'identification différentes » et saisissez le nom d'utilisateur / mot de passe OpenList.
+
+**rclone :**
+```bash
+rclone config
+# type = webdav
+# url  = https://<votre-worker>/dav
+# vendor = other
+# user = <nom-utilisateur-openlist>
+# pass = <mot-de-passe-openlist>
+```
 
 Chaque stockage apparaît comme un dossier de premier niveau sous `/dav/` (ex. `/dav/backblaze/...`).
 

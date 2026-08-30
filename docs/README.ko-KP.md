@@ -1,12 +1,10 @@
 # OpenList.ts
 
-[![Cloudflare Workers에 배치](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
-
 [English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
-[Cloudflare Workers](https://workers.cloudflare.com/)용 파일 목록 프로그램입니다. OpenList/AList 스타일의 웹 UI로 S3 호환 스토리지(Backblaze B2, Cloudflare R2, AWS S3, MinIO 등), Microsoft OneDrive, OneDrive APP, Alibaba Cloud Drive, PikPak, Dropbox, 189Cloud(天翼云盤)의 파일을 탐색하고 관리합니다.
+**클라우드 간 네이티브(크로스 클라우드)** 파일 목록 프로그램입니다. OpenList/AList 스타일의 웹 UI로 S3 호환 스토리지(Backblaze B2, Cloudflare R2, AWS S3, MinIO 등), Microsoft OneDrive, OneDrive APP, Alibaba Cloud Drive, PikPak, Dropbox, 189Cloud(天翼云盤)의 파일을 탐색하고 관리합니다. Web 표준 API로 작성되어 Cloudflare Workers, Netlify, Vercel, EdgeOne에 원클릭 배포가 가능하며, 모든 Node / Bun / Deno 플랫폼에서도 실행할 수 있습니다.
 
-전체가 TypeScript로 작성되었으며, 기본적으로 Workers 런타임에서 실행되고 파일 트리와 다운로드 링크는 [Cloudflare D1](https://developers.cloudflare.com/d1/)에 캐시됩니다. 데이터베이스 계층은 클라우드 간 이식이 가능합니다 — `USE_D1=false`로 설정하면 PostgreSQL(Cloudflare에서는 [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) 바인딩, 또는 일반 `PG_ADDRS` 연결 문자열)을 사용합니다. 동일한 요청 핸들러는 Cloudflare 외부의 Bun / Deno / Node에서도 실행할 수 있습니다([Cloudflare 외부에서 실행](#-cloudflare-외부에서-실행) 참고).
+전체가 TypeScript로 작성되었으며, Web 표준 API(`Request` / `Response`) 기반의 **클라우드 간 네이티브**로 특정 클라우드 벤더에 종속되지 않습니다. 파일 트리와 다운로드 링크 캐시는 기본적으로 [Cloudflare D1](https://developers.cloudflare.com/d1/)에 저장되며, PostgreSQL도 사용할 수 있습니다(`USE_D1=false`로 설정 후 Cloudflare에서는 [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) 바인딩, 다른 플랫폼에서는 `PG_ADDRS` 연결 문자열). 동일한 요청 핸들러는 Cloudflare Workers, Netlify, Vercel, EdgeOne 및 모든 Node / Bun / Deno 플랫폼에서 실행할 수 있습니다([크로스 플랫폼 실행](#-크로스-플랫폼-실행) 참고).
 
 > **OpenList.ts**는 OpenList 생태계 프로젝트이자 OpenList의 파생 프로젝트로, OpenList 생태계에 속합니다.
 
@@ -14,8 +12,8 @@
 
 ## ✨ 기능
 
-- ☁️ 기본적으로 Cloudflare Workers + D1에서 완전히 동작 (VPS 불필요)
-- 🌍 **클라우드 간·크로스플랫폼**: 데이터베이스 계층이 D1 또는 PostgreSQL(Hyperdrive / `PG_ADDRS`)을 지원. 동일한 요청 핸들러는 Cloudflare 외부의 Bun / Deno / Node에서도 실행 가능
+- ☁️ **클라우드 간 네이티브**(VPS 불필요): Cloudflare Workers, Netlify, Vercel, EdgeOne에 원클릭 배포, 또는 모든 Node / Bun / Deno 플랫폼에서 실행
+- 🌍 **클라우드 간 데이터베이스**: 스토리지 계층이 D1 또는 PostgreSQL(Hyperdrive / `PG_ADDRS`)을 지원하며, 모든 플랫폼에서 동일한 요청 처리를 유지
 - 📁 다중 스토리지 지원: **S3 호환**(B2 / R2 / AWS / MinIO), **OneDrive**, **OneDrive APP**, **Alibaba Cloud Drive**, **PikPak**, **Dropbox**, **189Cloud(天翼云盤)**
 - 🗄️ **파일 트리 캐시**: 탐색 시 데이터베이스의 캐시된 파일 트리를 읽음 — 관리자가 콜드 경로를 방문할 때만 스토리지 제공자에 접속하고, 다운로드 URL은 다운로드 시에 지연 생성
 - 🔐 사용자 인증 및 권한 (게스트 / 사용자 / 관리자)
@@ -34,11 +32,18 @@
 
 ## 🚀 빠른 배치
 
+**클라우드 간 네이티브** — 원하는 플랫폼을 선택해 원클릭 배치:
+
 [![Cloudflare Workers에 배치](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
+[![Netlify에 배치](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/Wudarensheng/OpenList.ts)
+[![Vercel로 배치](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Wudarensheng/OpenList.ts)
+[![EdgeOne(중국)에 배치](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
+[![EdgeOne(해외)에 배치](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
 
-위 버튼을 클릭하면 Cloudflare 계정에 직접 배치됩니다(Workers와 D1이 자동 생성). 배치 후 Worker URL을 열고 기본 자격 증명으로 로그인한 다음 관리자 패널에서 스토리지를 추가하세요.
+> - **Cloudflare Workers** : 원클릭으로 Workers + D1 생성. 배치 후 Worker URL을 열고 기본 자격 증명으로 로그인한 다음 관리자 패널에서 스토리지를 추가하세요.
+> - **Netlify / Vercel / EdgeOne / 자체 호스팅** : 이 플랫폼에는 D1 바인딩이 없으므로 `USE_D1=false`와 `PG_ADDRS` 환경 변수(PostgreSQL)를 설정하고 Node 엔트리(`node build.js`가 생성하는 `dist-node/server-node.js`)를 사용하세요.
 
-### 수동 배치
+### Cloudflare 수동 배치
 
 필수 조건: [Node.js](https://nodejs.org/) 18+ 및 [Wrangler](https://developers.cloudflare.com/workers/wrangler/).
 
@@ -87,16 +92,16 @@ D1 데이터베이스는 `.wrangler/state` 아래에 로컬로 시뮬레이션�
 
 ---
 
-## 🌍 Cloudflare 외부에서 실행
+## 🌍 크로스 플랫폼 실행
 
-동일한 요청 핸들러는 Web 표준 `Request`/`Response` 시맨틱을 가진 모든 호스트에서 실행할 수 있습니다. Cloudflare 외부에는 D1 바인딩이 없으므로 PostgreSQL을 대신 사용합니다:
+동일한 요청 핸들러는 Web 표준 `Request`/`Response` 시맨틱을 가진 모든 호스트에서 실행할 수 있습니다(Netlify / Vercel / EdgeOne 등의 함수 플랫폼, 또는 자체 호스팅 Node / Bun / Deno). 이 플랫폼에는 D1 바인딩이 없으므로 PostgreSQL을 대신 사용합니다:
 
 - **Bun** : `bun run src/server.ts`
 - **Deno** : `deno run --allow-net --allow-read --allow-env src/server.ts`
 - **Node** : `node build.js`(또는 `npm run build:node`)로 프로젝트와 내장 Node 엔트리를 `dist-node/`에 컴파일한 뒤 `node dist-node/server-node.js` 실행
 - **클라우드 함수** : 공급업체 빌드 단계에서 `node build.js`를 실행하고 함수 엔트리를 `dist-node/server-node.js`로 지정
 
-실행 요구 사항(Cloudflare 외부에는 D1 바인딩 없음):
+실행 요구 사항(D1 바인딩이 없는 플랫폼):
 
 ```bash
 USE_D1=false                              # PostgreSQL 모드
@@ -297,6 +302,21 @@ PG_ADDRS=postgres://user:pass@host:5432/dbname
 
 표준 WebDAV 프로토콜로 `/dav/`에 클라우드 드라이브를 로컬 폴더로 마운트할 수 있습니다. 지원 메서드:
 `PROPFIND`, `GET`, `HEAD`, `PUT`, `MKCOL`, `DELETE`, `MOVE`, `COPY`, `LOCK`, `UNLOCK`, `OPTIONS`.
+
+**Windows(탐색기):**
+1. '내 PC'를 마우스 오른쪽 버튼으로 클릭 → **네트워크 드라이브 연결**.
+2. 폴더에 `http://<당신의 worker>/dav/` 입력.
+3. '다른 자격 증명으로 연결'을 선택하고 OpenList 사용자명/비밀번호 입력.
+
+**rclone:**
+```bash
+rclone config
+# type = webdav
+# url  = https://<당신의 worker>/dav
+# vendor = other
+# user = <openlist 사용자명>
+# pass = <openlist 비밀번호>
+```
 
 각 스토리지는 `/dav/` 아래 최상위 폴더로 표시됩니다(예: `/dav/backblaze/...`).
 

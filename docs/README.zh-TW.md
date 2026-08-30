@@ -1,12 +1,10 @@
 # OpenList.ts
 
-[![部署到 Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
-
 [English](../README.md) · [簡體中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
-一個基於 [Cloudflare Workers](https://workers.cloudflare.com/) 的文件列表程序 —— 採用 OpenList/AList 風格網頁界面，可瀏覽和管理 S3 兼容存儲（Backblaze B2、Cloudflare R2、AWS S3、MinIO 等）、Microsoft OneDrive、OneDrive APP、阿里雲盤、PikPak、Dropbox 和天翼雲盤（189Cloud）上的文件。
+一個**跨雲原生**的文件列表程序 —— 採用 OpenList/AList 風格網頁界面，可瀏覽和管理 S3 兼容存儲（Backblaze B2、Cloudflare R2、AWS S3、MinIO 等）、Microsoft OneDrive、OneDrive APP、阿里雲盤、PikPak、Dropbox 和天翼雲盤（189Cloud）上的文件。基於 Web 標準 API 編寫，可一鍵部署到 Cloudflare Workers、Netlify、Vercel、EdgeOne，也能在任意 Node / Bun / Deno 平台上運行。
 
-全部使用 TypeScript 編寫，默認運行在 Workers 運行時上，文件樹和下載鏈接緩存存儲在 [Cloudflare D1](https://developers.cloudflare.com/d1/) 中。數據庫層是跨雲的 —— 設置 `USE_D1=false` 時改用 PostgreSQL（Cloudflare 上走 [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) 綁定，或直接使用 `PG_ADDRS` 連接串）；同一套請求處理邏輯也可以在 Cloudflare 之外的 Bun / Deno / Node 上運行（見[在 Cloudflare 之外運行](#-在-cloudflare-之外運行)）。
+全部使用 TypeScript 編寫，基於 Web 標準 API（`Request` / `Response`），**跨雲原生**、不綁定特定雲廠商。文件樹與下載鏈接緩存默認存儲在 [Cloudflare D1](https://developers.cloudflare.com/d1/) 中，也可使用 PostgreSQL（設置 `USE_D1=false` 後，Cloudflare 上走 [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) 綁定，其他平台用 `PG_ADDRS` 連接串）；同一套請求處理邏輯可運行在 Cloudflare Workers、Netlify、Vercel、EdgeOne 以及任意 Node / Bun / Deno 平台上（見[跨平台運行](#-跨平台運行)）。
 
 > **OpenList.ts** 是 OpenList 生態項目及衍生項目，屬於 OpenList 生態。
 
@@ -14,8 +12,8 @@
 
 ## ✨ 功能特性
 
-- ☁️ 默認完全運行在 Cloudflare Workers + D1 上（無需 VPS）
-- 🌍 **跨雲與跨平台**：數據庫層支持 D1 或 PostgreSQL（Hyperdrive / `PG_ADDRS`）；同一套請求處理邏輯可在 Cloudflare 之外的 Bun / Deno / Node 上運行
+- ☁️ **跨雲原生**（無需 VPS）：一鍵部署到 Cloudflare Workers、Netlify、Vercel、EdgeOne，或運行在任意 Node / Bun / Deno 平台
+- 🌍 **跨雲數據庫**：存儲層支持 D1 或 PostgreSQL（Hyperdrive / `PG_ADDRS`），同一套請求處理邏輯在各類平台上保持一致
 - 📁 多存儲支持：**S3 兼容**（B2 / R2 / AWS / MinIO）、**OneDrive**、**OneDrive APP**、**阿里雲盤**、**PikPak**、**Dropbox**、**天翼雲盤（189Cloud）**
 - 🗄️ **文件樹緩存**：瀏覽時從數據庫讀取緩存的文件樹 —— 僅當管理員訪問冷路徑時才聯繫存儲提供商，下載鏈接在下載時才按需生成
 - 🔐 用戶認證與授權（訪客 / 普通用戶 / 管理員）
@@ -34,11 +32,18 @@
 
 ## 🚀 快速部署
 
+**跨雲原生**，按需選擇任意平台一鍵部署：
+
 [![部署到 Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
+[![部署到 Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/Wudarensheng/OpenList.ts)
+[![部署到 Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Wudarensheng/OpenList.ts)
+[![部署到 EdgeOne（國內站）](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
+[![部署到 EdgeOne（國際站）](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
 
-點擊上方按鈕即可直接部署到你的 Cloudflare 賬戶（會自動創建 Workers 和 D1）。部署完成後打開 Worker 地址，使用默認憑據登錄，然後在管理面板中添加存儲。
+> - **Cloudflare Workers**：一鍵創建 Workers + D1，部署完成後打開 Worker 地址，使用默認憑據登錄，然後在管理面板中添加存儲。
+> - **Netlify / Vercel / EdgeOne / 自托管**：這些平台沒有 D1 綁定，需要配置 `USE_D1=false` 與 `PG_ADDRS` 環境變量（PostgreSQL），並選擇 Node 入口（`node build.js` 生成的 `dist-node/server-node.js`）。
 
-### 手動部署
+### 手動部署到 Cloudflare
 
 前置要求：[Node.js](https://nodejs.org/) 18+ 和 [Wrangler](https://developers.cloudflare.com/workers/wrangler/)。
 
@@ -87,16 +92,16 @@ D1 數據庫在本地 `.wrangler/state` 下模擬，schema 和緩存數據重啟
 
 ---
 
-## 🌍 在 Cloudflare 之外運行
+## 🌍 跨平台運行
 
-同一套請求處理邏輯可以在任何支持 Web 標準 `Request`/`Response` 語義的平台上運行。由於 Cloudflare 之外沒有 D1 綁定，改用 PostgreSQL：
+同一套請求處理邏輯可以在任何支持 Web 標準 `Request`/`Response` 語義的平台上運行（Netlify / Vercel / EdgeOne 等函數平台，或自托管的 Node / Bun / Deno）。這些平台沒有 D1 綁定，數據庫改用 PostgreSQL：
 
 - **Bun**：`bun run src/server.ts`
 - **Deno**：`deno run --allow-net --allow-read --allow-env src/server.ts`
 - **Node**：`node build.js`（或 `npm run build:node`）會把項目與內嵌的 Node 入口編譯到 `dist-node/`，然後 `node dist-node/server-node.js`
 - **雲函數**：在廠商構建步驟中運行 `node build.js`，並將函數入口指向 `dist-node/server-node.js`
 
-運行要求（Cloudflare 之外沒有 D1 綁定）：
+運行要求（無 D1 綁定的平台）：
 
 ```bash
 USE_D1=false                              # PostgreSQL 模式
@@ -297,6 +302,21 @@ PG_ADDRS=postgres://user:pass@host:5432/dbname
 
 通過標準 WebDAV 協議在 `/dav/` 掛載你的雲端網盤為本地資料夾。支持方法：
 `PROPFIND`、`GET`、`HEAD`、`PUT`、`MKCOL`、`DELETE`、`MOVE`、`COPY`、`LOCK`、`UNLOCK`、`OPTIONS`。
+
+**Windows（資源管理器）：**
+1. 右鍵「此電腦」→ **對應網路磁碟機**。
+2. 資料夾填 `http://<你的worker>/dav/`。
+3. 勾選「使用其他認證連接」，輸入 OpenList 使用者名稱/密碼。
+
+**rclone：**
+```bash
+rclone config
+# type = webdav
+# url  = https://<你的worker>/dav
+# vendor = other
+# user = <openlist使用者名稱>
+# pass = <openlist密碼>
+```
 
 每個存儲以頂層資料夾形式出現在 `/dav/` 下（如 `/dav/backblaze/...`）。
 

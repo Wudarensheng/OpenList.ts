@@ -1,12 +1,10 @@
 # OpenList.ts
 
-[![Cloudflare Workers にデプロイ](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
-
 [English](../README.md) · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md) · [日本語](./README.ja-JP.md) · [Français](./README.fr-FR.md) · [조선어](./README.ko-KP.md)
 
-[Cloudflare Workers](https://workers.cloudflare.com/) 上で動作するファイルリストプログラムです。OpenList/AList 風の Web UI で、S3 互換ストレージ（Backblaze B2、Cloudflare R2、AWS S3、MinIO など）、Microsoft OneDrive、OneDrive APP、Alibaba Cloud Drive、PikPak、Dropbox、189Cloud（天翼云盤）上のファイルを閲覧・管理できます。
+**クロスクラウドネイティブ**なファイルリストプログラムです。OpenList/AList 風の Web UI で、S3 互換ストレージ（Backblaze B2、Cloudflare R2、AWS S3、MinIO など）、Microsoft OneDrive、OneDrive APP、Alibaba Cloud Drive、PikPak、Dropbox、189Cloud（天翼云盤）上のファイルを閲覧・管理できます。Web 標準 API で書かれており、Cloudflare Workers、Netlify、Vercel、EdgeOne にワンクリックでデプロイでき、任意の Node / Bun / Deno プラットフォームでも実行できます。
 
-すべて TypeScript で書かれており、デフォルトで Workers ランタイム上で動作し、ファイルツリーとダウンロードリンクは [Cloudflare D1](https://developers.cloudflare.com/d1/) にキャッシュされます。データベース層はクラウド横断対応です — `USE_D1=false` にすると PostgreSQL（Cloudflare では [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) バインディング、または `PG_ADDRS` 接続文字列）を使用します。同じリクエストハンドラは Cloudflare 外の Bun / Deno / Node でも実行できます（[Cloudflare 外での実行](#-cloudflare-外での実行) を参照）。
+すべて TypeScript で書かれ、Web 標準 API（`Request` / `Response`）ベースの**クロスクラウドネイティブ**で、特定のクラウドベンダーに依存しません。ファイルツリーとダウンロードリンクキャッシュはデフォルトで [Cloudflare D1](https://developers.cloudflare.com/d1/) に保存され、PostgreSQL も利用可能です（`USE_D1=false` に設定後、Cloudflare では [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) バインディング、他プラットフォームでは `PG_ADDRS` 接続文字列）。同じリクエストハンドラは Cloudflare Workers、Netlify、Vercel、EdgeOne および任意の Node / Bun / Deno プラットフォームで実行できます（[クロスプラットフォーム実行](#-クロスプラットフォーム実行) を参照）。
 
 > **OpenList.ts** は OpenList エコシステムのプロジェクトであり、OpenList エコシステムに属する派生プロジェクトです。
 
@@ -14,8 +12,8 @@
 
 ## ✨ 機能
 
-- ☁️ デフォルトで Cloudflare Workers + D1 上で完結（VPS 不要）
-- 🌍 **クラウド横断・クロスプラットフォーム**：データベース層は D1 または PostgreSQL（Hyperdrive / `PG_ADDRS`）に対応。同じリクエストハンドラは Cloudflare 外の Bun / Deno / Node でも実行可能
+- ☁️ **クロスクラウドネイティブ**（VPS 不要）：Cloudflare Workers、Netlify、Vercel、EdgeOne にワンクリックデプロイ、または任意の Node / Bun / Deno プラットフォームで実行
+- 🌍 **クロスクラウドデータベース**：ストレージ層は D1 または PostgreSQL（Hyperdrive / `PG_ADDRS`）に対応。同じリクエスト処理を全プラットフォームで一貫
 - 📁 マルチストレージ対応：**S3 互換**（B2 / R2 / AWS / MinIO）、**OneDrive**、**OneDrive APP**、**Alibaba Cloud Drive**、**PikPak**、**Dropbox**、**189Cloud（天翼云盤）**
 - 🗄️ **ファイルツリーキャッシュ**：ブラウズ時はデータベースのキャッシュを読み取り、ストレージ提供元へは管理者がコールドパスを開いたときだけ接続。ダウンロード URL はダウンロード時に遅延生成
 - 🔐 ユーザー認証・権限（ゲスト / ユーザー / 管理者）
@@ -34,11 +32,18 @@
 
 ## 🚀 クイックデプロイ
 
+**クロスクラウドネイティブ** — 任意のプラットフォームを選んでワンクリックデプロイ：
+
 [![Cloudflare Workers にデプロイ](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
+[![Netlify にデプロイ](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/Wudarensheng/OpenList.ts)
+[![Vercel でデプロイ](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Wudarensheng/OpenList.ts)
+[![EdgeOne（中国国内）にデプロイ](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
+[![EdgeOne（海外）にデプロイ](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
 
-上のボタンをクリックすると、Cloudflare アカウントに直接デプロイできます（Workers と D1 が自動生成されます）。デプロイ後、Worker URL を開いてデフォルト認証情報でログインし、管理パネルでストレージを追加してください。
+> - **Cloudflare Workers**：ワンクリックで Workers + D1 を作成。デプロイ後に Worker URL を開き、デフォルト認証情報でログインして管理パネルでストレージを追加してください。
+> - **Netlify / Vercel / EdgeOne / セルフホスト**：これらのプラットフォームには D1 バインディングがないため、`USE_D1=false` と `PG_ADDRS` 環境変数（PostgreSQL）を設定し、Node エントリ（`node build.js` が生成する `dist-node/server-node.js`）を指定してください。
 
-### 手動デプロイ
+### Cloudflare への手動デプロイ
 
 前提条件：[Node.js](https://nodejs.org/) 18+ と [Wrangler](https://developers.cloudflare.com/workers/wrangler/)。
 
@@ -87,16 +92,16 @@ D1 データベースは `.wrangler/state` 下でローカルにシミュレー�
 
 ---
 
-## 🌍 Cloudflare 外での実行
+## 🌍 クロスプラットフォーム実行
 
-同じリクエストハンドラは、Web 標準の `Request`/`Response` セマンティクスを持つ任意のホストで実行できます。Cloudflare 外には D1 バインディングがないため、代わりに PostgreSQL を使用します：
+同じリクエストハンドラは、Web 標準の `Request`/`Response` セマンティクスを持つ任意のホストで実行できます（Netlify / Vercel / EdgeOne などの関数プラットフォーム、またはセルフホストの Node / Bun / Deno）。これらのプラットフォームには D1 バインディングがないため、代わりに PostgreSQL を使用します：
 
 - **Bun**：`bun run src/server.ts`
 - **Deno**：`deno run --allow-net --allow-read --allow-env src/server.ts`
 - **Node**：`node build.js`（または `npm run build:node`）でプロジェクトと組み込み Node エントリを `dist-node/` にコンパイルし、`node dist-node/server-node.js` で起動
 - **クラウド関数**：ベンダーのビルドステップで `node build.js` を実行し、関数エントリを `dist-node/server-node.js` に指定
 
-実行要件（Cloudflare 外には D1 バインディングなし）：
+実行要件（D1 バインディングのないプラットフォーム）：
 
 ```bash
 USE_D1=false                              # PostgreSQL モード
@@ -297,6 +302,21 @@ PG_ADDRS=postgres://user:pass@host:5432/dbname
 
 標準 WebDAV プロトコルで `/dav/` にクラウドドライブをローカルフォルダとしてマウントできます。対応メソッド：
 `PROPFIND`、`GET`、`HEAD`、`PUT`、`MKCOL`、`DELETE`、`MOVE`、`COPY`、`LOCK`、`UNLOCK`、`OPTIONS`。
+
+**Windows（エクスプローラー）：**
+1. 「PC」を右クリック → **ネットワークドライブの割り当て**。
+2. フォルダーに `http://<あなたのworker>/dav/` を入力。
+3. 「別の資格情報を使用して接続する」にチェックし、OpenList のユーザー名/パスワードを入力。
+
+**rclone：**
+```bash
+rclone config
+# type = webdav
+# url  = https://<あなたのworker>/dav
+# vendor = other
+# user = <openlistユーザー名>
+# pass = <openlistパスワード>
+```
 
 各ストレージは `/dav/` のトップレベルフォルダとして表示されます（例: `/dav/backblaze/...`）。
 

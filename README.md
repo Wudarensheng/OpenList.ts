@@ -1,12 +1,10 @@
 # OpenList.ts
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
-
 [English](./README.md) · [简体中文](./docs/README.zh-CN.md) · [繁體中文](./docs/README.zh-TW.md) · [日本語](./docs/README.ja-JP.md) · [Français](./docs/README.fr-FR.md) · [조선어](./docs/README.ko-KP.md)
 
-A file-list program for [Cloudflare Workers](https://workers.cloudflare.com/) — an OpenList/AList-style web UI that browses and manages files on S3-compatible storage (Backblaze B2, Cloudflare R2, AWS S3, MinIO, …), Microsoft OneDrive, OneDrive APP, Alibaba Cloud Drive, PikPak, Dropbox and 189Cloud (天翼云盘).
+A **cross-cloud native** file-list program — an OpenList/AList-style web UI that browses and manages files on S3-compatible storage (Backblaze B2, Cloudflare R2, AWS S3, MinIO, …), Microsoft OneDrive, OneDrive APP, Alibaba Cloud Drive, PikPak, Dropbox and 189Cloud (天翼云盘). Built on Web-standard APIs, it can be deployed with one click to Cloudflare Workers, Netlify, Vercel and EdgeOne, and also runs on any Node / Bun / Deno platform.
 
-Everything is TypeScript and runs on the Workers runtime by default, storing its file tree and download links in [Cloudflare D1](https://developers.cloudflare.com/d1/). The database layer is cross-cloud — with `USE_D1=false` it uses PostgreSQL instead (a [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) binding on Cloudflare, or a plain `PG_ADDRS` connection string) — and the same request handler can also run outside Cloudflare on Bun, Deno or Node (see [Running outside Cloudflare](#-running-outside-cloudflare)).
+Everything is TypeScript, built on Web-standard APIs (`Request` / `Response`), **cross-cloud native** and not tied to any cloud vendor. The file tree and download-link cache default to [Cloudflare D1](https://developers.cloudflare.com/d1/), or PostgreSQL (set `USE_D1=false`; a [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) binding on Cloudflare, or a `PG_ADDRS` connection string elsewhere). The same request handler runs on Cloudflare Workers, Netlify, Vercel, EdgeOne and any Node / Bun / Deno platform (see [Cross-platform running](#-cross-platform-running)).
 
 > **OpenList.ts** is an ecosystem project and a derivative of OpenList, part of the OpenList ecosystem.
 
@@ -14,8 +12,8 @@ Everything is TypeScript and runs on the Workers runtime by default, storing its
 
 ## ✨ Features
 
-- ☁️ Runs entirely on Cloudflare Workers + D1 by default (no VPS required)
-- 🌍 **Cross-cloud & cross-platform**: database layer supports D1 or PostgreSQL (Hyperdrive / `PG_ADDRS`); the same request handler runs on Bun / Deno / Node outside Cloudflare
+- ☁️ **Cross-cloud native** (no VPS required): deploy with one click to Cloudflare Workers, Netlify, Vercel, EdgeOne, or run on any Node / Bun / Deno platform
+- 🌍 **Cross-cloud database**: storage layer supports D1 or PostgreSQL (Hyperdrive / `PG_ADDRS`), with the same request handling kept consistent across platforms
 - 📁 Multi-storage support: **S3-compatible** (B2 / R2 / AWS / MinIO), **OneDrive**, **OneDrive APP**, **Alibaba Cloud Drive (AliyunPan)**, **PikPak**, **Dropbox**, **189Cloud (天翼云盘)**
 - 🗄️ **File-tree cache**: browsing reads the cached tree from the database — the storage provider is only contacted when an admin visits a cold path, and download URLs are generated lazily on download
 - 🔐 User authentication & authorization (guest / user / admin roles)
@@ -34,18 +32,18 @@ Everything is TypeScript and runs on the Workers runtime by default, storing its
 
 ## 🚀 Quick Deploy
 
+**Cross-cloud native** — pick any platform and deploy with one click:
+
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Wudarensheng/OpenList.ts)
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/Wudarensheng/OpenList.ts)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Wudarensheng/OpenList.ts)
+[![Deploy to EdgeOne (Mainland China)](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
+[![Deploy to EdgeOne (International)](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2FWudarensheng%2FOpenList.ts)
 
-Click the button above to deploy directly to your Cloudflare account. The one-click
-flow reads `wrangler.toml`, creates a fresh D1 database in *your* account (the
-`database_id` is intentionally left empty in the repo), and deploys the worker.
-After deployment, open your Worker URL and log in with the default credentials,
-then add a storage in the admin panel.
+> - **Cloudflare Workers**: one-click creates Workers + D1. After deployment, open your Worker URL, log in with the default credentials, then add a storage in the admin panel.
+> - **Netlify / Vercel / EdgeOne / self-hosted**: these platforms have no D1 binding — configure the `USE_D1=false` and `PG_ADDRS` environment variables (PostgreSQL) and use the Node entry (`dist-node/server-node.js` produced by `node build.js`).
 
-> The worker auto-creates the D1 schema on first run (`src/models/init.ts`), so no
-> manual schema step is needed after deployment.
-
-### Manual deployment
+### Manual deployment to Cloudflare
 
 Prerequisites: [Node.js](https://nodejs.org/) 18+ and [Wrangler](https://developers.cloudflare.com/workers/wrangler/).
 
@@ -99,16 +97,16 @@ Other useful scripts:
 
 ---
 
-## 🌍 Running outside Cloudflare
+## 🌍 Cross-platform running
 
-The exact same request handler can run on any host with Web-standard `Request`/`Response` semantics. Since there is no D1 binding off Cloudflare, PostgreSQL is used instead:
+The exact same request handler can run on any host with Web-standard `Request`/`Response` semantics (function platforms such as Netlify / Vercel / EdgeOne, or self-hosted Node / Bun / Deno). These platforms have no D1 binding, so PostgreSQL is used instead:
 
 - **Bun**: `bun run src/server.ts`
 - **Deno**: `deno run --allow-net --allow-read --allow-env src/server.ts`
 - **Node**: `node build.js` (or `npm run build:node`) compiles the project and the embedded Node entry to `dist-node/`, then `node dist-node/server-node.js`
 - **Cloud functions**: run `node build.js` as the vendor build step and point the function entry to `dist-node/server-node.js`
 
-Requirements (no D1 binding exists off Cloudflare):
+Requirements (platforms without a D1 binding):
 
 ```bash
 USE_D1=false                              # PostgreSQL mode
