@@ -140,6 +140,25 @@ export default async function onRequest(context) {
               await sql.end().catch(() => {});
             }
           }
+
+          // 云端运行真实 initializeDatabase（与应用完全相同的路径）
+          try {
+            const { createDatabase } = require('../dist-node/db/index.js');
+            const { initializeDatabase } = require('../dist-node/models/init.js');
+            const env = {
+              DB: createDatabase({ USE_D1: 'false', PG_ADDRS: urlStr, HYPERDRIVE: undefined }),
+              ENVIRONMENT: 'production',
+              USE_D1: 'false',
+              PG_ADDRS: urlStr,
+            };
+            const tInit = Date.now();
+            await withTimeout(initializeDatabase(env), 20000, 'init');
+            out.details.initMs = Date.now() - tInit;
+            out.details.initOk = true;
+          } catch (e) {
+            out.details.initOk = false;
+            out.details.initError = e && e.message ? e.message : String(e);
+          }
         }
       }
     }
