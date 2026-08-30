@@ -11,7 +11,7 @@
  */
 'use strict';
 
-const { handleFetch, createEnv } = require('../dist-node/server-node.js');
+const { handleFetch, createEnv } = require('../../dist-node/server-node.js');
 const env = createEnv();
 
 export default async function onRequest(context) {
