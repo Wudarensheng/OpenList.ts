@@ -3,6 +3,7 @@ export function jsonResponse(data: any, status: number = 200): Response {
     status,
     headers: {
       'Content-Type': 'application/json',
+      'Cache-Control': 'no-store', // dynamic API data must never be edge-cached
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
