@@ -159,6 +159,31 @@ export default async function onRequest(context) {
             out.details.initOk = false;
             out.details.initError = e && e.message ? e.message : String(e);
           }
+
+          // 加载完整应用模块（dist-node/server-node.js）并调用真实 handleFetch
+          try {
+            const tLoad = Date.now();
+            const mod = await withTimeout(
+              Promise.resolve().then(() => require('../dist-node/server-node.js')),
+              20000,
+              'moduleLoad'
+            );
+            out.details.moduleLoadMs = Date.now() - tLoad;
+
+            const { handleFetch, createEnv } = mod;
+            const appEnv = createEnv();
+            const tApp = Date.now();
+            const resp = await withTimeout(
+              handleFetch(new Request('https://example.com/api/public/settings'), appEnv),
+              20000,
+              'appFetch'
+            );
+            out.details.appStatus = resp.status;
+            out.details.appMs = Date.now() - tApp;
+            out.details.appBody = (await resp.text()).slice(0, 200);
+          } catch (e) {
+            out.details.appError = e && e.message ? e.message : String(e);
+          }
         }
       }
     }
