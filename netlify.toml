@@ -1,0 +1,29 @@
+# Netlify deployment for OpenList.ts
+#
+# - `node build.js` produces dist-node/ (the Node build of the app).
+# - Static assets under dist-node/public are served directly by Netlify.
+# - Every other path is rewritten to the serverless function, which adapts
+#   Netlify's event to the app's Web-standard fetch handler.
+#
+# Environment variables (Netlify site settings):
+#   USE_D1=false  and  PG_ADDRS=postgres://user:pass@host:5432/dbname
+# (Netlify has no D1 binding, so PostgreSQL is required.)
+
+[build]
+  command = "npm install && node build.js"
+  publish = "dist-node/public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[functions]]
+  path = "netlify/functions/server.js"
+  # Keep npm dependencies external so the bundled function can require them.
+  external_node_modules = ["postgres", "aws4fetch", "qrcode", "fflate"]
+  included_files = ["dist-node/public/**"]
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/server"
+  status = 200

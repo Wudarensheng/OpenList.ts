@@ -1,0 +1,13 @@
+{
+  "buildCommand": "node build.js",
+  "installCommand": "npm install",
+  "outputDirectory": "dist-node/public",
+  "nodeVersion": "22.11.0",
+  "cloudFunctions": {
+    "nodejs": {
+      "externalNodeModules": ["postgres", "aws4fetch", "qrcode", "fflate"],
+      "includeFiles": ["dist-node/public/**"],
+      "maxDuration": 60
+    }
+  }
+}
