@@ -117,7 +117,12 @@ export class PostgresAdapter implements Database {
       // and reject plaintext connections, yet their sample connection strings
       // often omit `?sslmode=`. Default to TLS unless the string (or PGSSL)
       // already picks a mode explicitly, so pooler URLs connect out of the box.
-      ...(tlsConfigured(connectionString) ? {} : { ssl: true as const }),
+      //
+      // Use `ssl: 'require'` (encrypt, skip cert verification) rather than
+      // `ssl: true`: Supabase/Neon pooler cert chains contain a self-signed
+      // certificate, so full verification fails with SELF_SIGNED_CERT_IN_CHAIN.
+      // Callers who want verification can set `?sslmode=verify-full` explicitly.
+      ...(tlsConfigured(connectionString) ? {} : { ssl: 'require' as const }),
     });
   }
 

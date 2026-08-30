@@ -67,7 +67,7 @@ async function main() {
         serialize: (x) => String(x),
       },
     },
-    ...(tlsConfigured(url) ? {} : { ssl: true }),
+    ...(tlsConfigured(url) ? {} : { ssl: 'require' }), // encrypt, skip cert verify
   });
 
   // 1) Connection test
