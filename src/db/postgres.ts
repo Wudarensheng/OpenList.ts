@@ -17,6 +17,19 @@ type Executor = {
   unsafe(query: string, params?: unknown[]): Promise<unknown[]>;
 };
 
+/**
+ * Whether TLS is configured for the connection. postgres.js negotiates SSL
+ * from (in priority order) the options object, the connection string's
+ * `?sslmode=` parameter, then the `PGSSL` env var; default is plaintext.
+ */
+function tlsConfigured(connectionString: string): boolean {
+  const queryIdx = connectionString.indexOf('?');
+  const hasSslmode =
+    queryIdx !== -1 && /(?:^|&)sslmode=/i.test(connectionString.slice(queryIdx + 1));
+  if (hasSslmode) return true;
+  return typeof process !== 'undefined' && !!process.env?.PGSSL;
+}
+
 function buildResult(rows: unknown[], originalSql: string): DbResult {
   let lastRowId: number | undefined;
   const m = originalSql.match(/^\s*INSERT\s+INTO\s+(\w+)/i);
@@ -94,6 +107,12 @@ export class PostgresAdapter implements Database {
           serialize: (x: number) => String(x),
         },
       },
+      // postgres.js defaults to plaintext (`ssl: false`). Neon / Supabase
+      // *transaction poolers* (e.g. `*.pooler.supabase.com:6543`) require TLS
+      // and reject plaintext connections, yet their sample connection strings
+      // often omit `?sslmode=`. Default to TLS unless the string (or PGSSL)
+      // already picks a mode explicitly, so pooler URLs connect out of the box.
+      ...(tlsConfigured(connectionString) ? {} : { ssl: true as const }),
     });
   }
 
