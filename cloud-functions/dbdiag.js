@@ -13,6 +13,13 @@ const dns = require('node:dns');
 const net = require('node:net');
 const { URL } = require('node:url');
 
+let postgres = null;
+try {
+  postgres = require('postgres');
+} catch {
+  // postgres 未安装时跳过数据库协议测试
+}
+
 function parsePg(urlStr) {
   try {
     const u = new URL(urlStr);
@@ -81,9 +88,36 @@ export default async function onRequest(context) {
           out.error = 'TCP 连不上 ' + parsed.host + ':' + parsed.port +
             '（可能是数据库 IP 白名单/防火墙/端口不通）';
         } else {
-          out.ok = true;
-          out.step = 'done';
-          out.error = '网络层连通正常（DNS+TCP 都通）。若应用仍报连接错误/超时，则是数据库协议/TLS 层问题。';
+          out.step = 'pg';
+          // 用与应用相同的配置实际执行一次查询（TLS + 连接 + 协议层验证）
+          if (!postgres) {
+            out.error = '网络层连通正常，但 postgres 模块不可用，无法做协议层测试';
+          } else {
+            const sql = postgres(urlStr, {
+              max: 1,
+              prepare: false,
+              connect_timeout: 10,
+              // 与应用一致：无 sslmode 时加密但不校验证书
+              ssl: /(?:^|&)sslmode=/i.test((urlStr.match(/\?([^#]*)/) || ['', ''])[1])
+                ? undefined
+                : 'require',
+            });
+            try {
+              const r = await sql.unsafe('SELECT 1 AS ok');
+              out.details.pgSelect = r;
+              const t2 = await sql.unsafe(
+                "SELECT count(*)::int AS tables FROM information_schema.tables WHERE table_schema = 'public'"
+              );
+              out.details.pgTables = t2;
+              out.ok = true;
+              out.step = 'done';
+              out.error = '数据库查询成功，public schema 下表数量: ' + (t2 && t2[0] && t2[0].tables);
+            } catch (e) {
+              out.error = '数据库协议层失败: ' + (e && e.message ? e.message : e);
+            } finally {
+              await sql.end().catch(() => {});
+            }
+          }
         }
       }
     }

@@ -286,17 +286,32 @@ function readEnv(name: string): string | undefined {
 }
 
 let initialized = false;
+let initPromise = null;
+
+// Single-flight init: concurrent cold-start requests share the same init
+// instead of each running initializeDatabase (which serializes on the pool
+// and blows past the platform timeout).
+async function ensureInitialized(env: Env): Promise<void> {
+  if (initialized) return;
+  if (!initPromise) {
+    initPromise = (async () => {
+      if (!(env as any).DB) {
+        (env as any).DB = createDatabase(env);
+      }
+      await initializeDatabase(env);
+      initialized = true;
+    })().catch(err => {
+      initPromise = null; // allow retry on a later request
+      throw err;
+    });
+  }
+  await initPromise;
+}
 
 // Drop-in for the worker fetch handler: takes a Web-standard Request and
 // returns a Web-standard Response. Safe to call from any serverless wrapper.
 export async function handleFetch(request: Request, env: Env): Promise<Response> {
-  if (!initialized) {
-    if (!(env as any).DB) {
-      (env as any).DB = createDatabase(env);
-    }
-    await initializeDatabase(env);
-    initialized = true;
-  }
+  await ensureInitialized(env);
   return handleRequest(request, env, {} as ContextLike);
 }
 
