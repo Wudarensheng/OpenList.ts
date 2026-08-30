@@ -81,6 +81,12 @@ async function ensureDrivers(): Promise<void> {
     yandexDiskMod,
     open123Mod,
     quarkOpenMod,
+    embyMod,
+    seafileMod,
+    cloudreveMod,
+    pan123Mod,
+    baiduNetdiskMod,
+    yun139Mod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -94,6 +100,12 @@ async function ensureDrivers(): Promise<void> {
     import('./yandex_disk'),
     import('./123_open'),
     import('./quark_open'),
+    import('./emby'),
+    import('./seafile'),
+    import('./cloudreve'),
+    import('./123'),
+    import('./baidu_netdisk'),
+    import('./139'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -109,6 +121,12 @@ async function ensureDrivers(): Promise<void> {
   if (yandexDiskMod.yandexDiskConfig) registerDriver(yandexDiskMod.YandexDiskDriver, yandexDiskMod.yandexDiskConfig, yandexDiskMod.yandexDiskAdditional);
   if (open123Mod.open123Config) registerDriver(open123Mod.Open123Driver, open123Mod.open123Config, open123Mod.open123Additional);
   if (quarkOpenMod.quarkOpenConfig) registerDriver(quarkOpenMod.QuarkOpenDriver, quarkOpenMod.quarkOpenConfig, quarkOpenMod.quarkOpenAdditional);
+  if (embyMod.embyConfig) registerDriver(embyMod.EmbyDriver, embyMod.embyConfig, embyMod.embyAdditional);
+  if (seafileMod.seafileConfig) registerDriver(seafileMod.SeafileDriver, seafileMod.seafileConfig, seafileMod.seafileAdditional);
+  if (cloudreveMod.cloudreveConfig) registerDriver(cloudreveMod.CloudreveDriver, cloudreveMod.cloudreveConfig, cloudreveMod.cloudreveAdditional);
+  if (pan123Mod.pan123Config) registerDriver(pan123Mod.Pan123Driver, pan123Mod.pan123Config, pan123Mod.pan123Additional);
+  if (baiduNetdiskMod.baiduNetdiskConfig) registerDriver(baiduNetdiskMod.BaiduNetdiskDriver, baiduNetdiskMod.baiduNetdiskConfig, baiduNetdiskMod.baiduNetdiskAdditional);
+  if (yun139Mod.yun139Config) registerDriver(yun139Mod.Yun139Driver, yun139Mod.yun139Config, yun139Mod.yun139Additional);
 }
 
 /**
