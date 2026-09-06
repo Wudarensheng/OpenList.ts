@@ -117,15 +117,70 @@ function readU16(b: Uint8Array, o: number): number {
   return (b[o] | (b[o + 1] << 8)) >>> 0;
 }
 
-function decodeName(b: Uint8Array): string {
+/** Charset used when a zip entry has no EFS flag and the raw name is not UTF-8. */
+const DEFAULT_LEGACY_CHARSET = 'GB18030';
+const LEGACY_CHARSET_SETTING = 'non_efs_zip_encoding';
+
+const utf8Decoder = new TextDecoder('utf-8');
+const utf8StrictDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
+const charsetDecoderCache = new Map<string, TextDecoder | null>();
+
+function getCharsetDecoder(charset: string): TextDecoder | null {
+  const key = (charset || '').trim().toLowerCase();
+  if (!key) return null;
+  if (key === 'utf-8' || key === 'utf8') return utf8Decoder;
+  if (charsetDecoderCache.has(key)) return charsetDecoderCache.get(key)!;
+  let decoder: TextDecoder | null = null;
   try {
-    return new TextDecoder('utf-8').decode(b);
+    decoder = new TextDecoder(charset);
   } catch {
-    return '';
+    // label not supported by this runtime (e.g. "ibm437"/"cp936")
+    decoder = null;
+  }
+  charsetDecoderCache.set(key, decoder);
+  return decoder;
+}
+
+/**
+ * Decode an archive entry name.
+ *
+ * - `forceUtf8` (zip EFS flag bit 0x800 set) -> the name is declared UTF-8.
+ * - otherwise prefer strict UTF-8; only when the bytes are *not* valid UTF-8
+ *   (e.g. GBK names written by Windows zip tools without the EFS flag) fall
+ *   back to the configured legacy charset.
+ */
+export function decodeName(b: Uint8Array, legacyCharset: string, forceUtf8 = false): string {
+  if (forceUtf8) return utf8Decoder.decode(b);
+  try {
+    return utf8StrictDecoder.decode(b);
+  } catch {
+    // Not valid UTF-8 -> retry with the configured legacy charset.
+    const decoder = getCharsetDecoder(legacyCharset);
+    if (decoder) {
+      try {
+        return decoder.decode(b);
+      } catch {
+        // fall through
+      }
+    }
+    return utf8Decoder.decode(b);
   }
 }
 
-async function parseZipEntries(source: ArchiveSource, fileSize: number): Promise<{ entries: ArchiveEntry[]; encrypted: boolean; comment: string }> {
+/** Resolve the configured zip legacy charset, falling back to GB18030. */
+async function resolveLegacyCharset(env: Env): Promise<string> {
+  try {
+    const row: any = await env.DB.prepare('SELECT value FROM settings WHERE key = ?')
+      .bind(LEGACY_CHARSET_SETTING).first();
+    const v = row?.value;
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  } catch {
+    // DB unavailable (unit tests / non-DB envs) -> default.
+  }
+  return DEFAULT_LEGACY_CHARSET;
+}
+
+async function parseZipEntries(source: ArchiveSource, fileSize: number, legacyCharset: string): Promise<{ entries: ArchiveEntry[]; encrypted: boolean; comment: string }> {
   // Read the EOCD by scanning the last 64KB.
   const tailLen = Math.min(65557, fileSize);
   const tail = await rangeFetch(source, fileSize - tailLen, tailLen);
@@ -146,7 +201,7 @@ async function parseZipEntries(source: ArchiveSource, fileSize: number): Promise
   const cdSize = readU32(buf, eocdIndex + 12);
   const cdOffset = readU32(buf, eocdIndex + 16);
   const commentLen = readU16(buf, eocdIndex + 20);
-  const comment = decodeName(buf.slice(eocdIndex + 22, eocdIndex + 22 + commentLen));
+  const comment = decodeName(buf.slice(eocdIndex + 22, eocdIndex + 22 + commentLen), legacyCharset);
 
   // ZIP64: total entries = 0xffff or cdSize/cdOffset = 0xffffffff signals ZIP64.
   if (totalEntries === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
@@ -164,15 +219,15 @@ async function parseZipEntries(source: ArchiveSource, fileSize: number): Promise
         const totalEntries64 = Number(readU32(zb, 32)) | (Number(readU32(zb, 36)) << 32);
         const cdSize64 = Number(readU32(zb, 40)) | (Number(readU32(zb, 44)) << 32);
         const cdOffset64 = Number(readU32(zb, 48)) | (Number(readU32(zb, 52)) << 32);
-        return parseCentralDirectory(source, cdOffset64, cdSize64, totalEntries64);
+        return parseCentralDirectory(source, cdOffset64, cdSize64, totalEntries64, legacyCharset);
       }
     }
   }
 
-  return parseCentralDirectory(source, cdOffset, cdSize, totalEntries);
+  return parseCentralDirectory(source, cdOffset, cdSize, totalEntries, legacyCharset);
 }
 
-async function parseCentralDirectory(source: ArchiveSource, cdOffset: number, cdSize: number, totalEntries: number): Promise<{ entries: ArchiveEntry[]; encrypted: boolean; comment: string }> {
+async function parseCentralDirectory(source: ArchiveSource, cdOffset: number, cdSize: number, totalEntries: number, legacyCharset: string): Promise<{ entries: ArchiveEntry[]; encrypted: boolean; comment: string }> {
   const cd = await rangeFetch(source, cdOffset, Math.min(cdSize, 64 * 1024 * 1024));
   const buf = cd.data;
   const entries: ArchiveEntry[] = [];
@@ -192,7 +247,11 @@ async function parseCentralDirectory(source: ArchiveSource, cdOffset: number, cd
     const extraLen = readU16(buf, pos + 30);
     const commentLen = readU16(buf, pos + 32);
     const localHeaderOffset = readU32(buf, pos + 42);
-    const name = decodeName(buf.slice(pos + 46, pos + 46 + nameLen));
+    const nameBytes = buf.slice(pos + 46, pos + 46 + nameLen);
+    // Bit 11 (0x800) = EFS: filename is UTF-8. Otherwise prefer strict UTF-8
+    // and fall back to the configured legacy charset when the bytes are not
+    // valid UTF-8 (GBK etc.).
+    const name = decodeName(nameBytes, legacyCharset, (flags & 0x800) !== 0);
 
     // Bit 0 = encrypted (ZipCrypto); AES uses method 99.
     if ((flags & 1) !== 0 || method === 99) encrypted = true;
@@ -260,7 +319,7 @@ async function extractZipEntry(source: ArchiveSource, entry: ArchiveEntry): Prom
 // TAR parsing (ustar)
 // ---------------------------------------------------------------------------
 
-async function parseTarEntries(source: ArchiveSource, fileSize: number): Promise<{ entries: ArchiveEntry[]; encrypted: boolean; comment: string }> {
+async function parseTarEntries(source: ArchiveSource, fileSize: number, legacyCharset: string): Promise<{ entries: ArchiveEntry[]; encrypted: boolean; comment: string }> {
   const entries: ArchiveEntry[] = [];
   const chunkSize = 512 * 1024;
   let offset = 0;
@@ -287,11 +346,11 @@ async function parseTarEntries(source: ArchiveSource, fileSize: number): Promise
 
     const nameBuf = header.subarray(0, 100);
     const prefixBuf = header.subarray(345, 345 + 155);
-    let name = decodeName(nameBuf).replace(/\0.*$/, '');
-    const prefix = decodeName(prefixBuf).replace(/\0.*$/, '');
+    let name = decodeName(nameBuf, legacyCharset).replace(/\0.*$/, '');
+    const prefix = decodeName(prefixBuf, legacyCharset).replace(/\0.*$/, '');
     if (prefix) name = `${prefix}/${name}`;
 
-    const sizeStr = decodeName(header.subarray(124, 136)).replace(/[^0-9o]/gi, '');
+    const sizeStr = decodeName(header.subarray(124, 136), legacyCharset).replace(/[^0-9o]/gi, '');
     let size = 0;
     try {
       size = parseInt(sizeStr, 8) || 0;
@@ -299,7 +358,7 @@ async function parseTarEntries(source: ArchiveSource, fileSize: number): Promise
       size = 0;
     }
     const typeflag = String.fromCharCode(header[156] || 0);
-    const modStr = decodeName(header.subarray(136, 148)).replace(/\0.*$/, '');
+    const modStr = decodeName(header.subarray(136, 148), legacyCharset).replace(/\0.*$/, '');
     let modified: string | undefined;
     const modTs = parseInt(modStr.replace(/[^0-9]/g, ''), 10);
     if (!isNaN(modTs) && modTs > 0) modified = new Date(modTs * 1000).toISOString();
@@ -367,20 +426,21 @@ async function fetchAll(source: ArchiveSource): Promise<Uint8Array> {
 export async function parseArchive(path: string, env: Env): Promise<ParsedArchive> {
   const source = await getArchiveSource(path, env);
   const fileSize = await getFileSize(source);
+  const legacyCharset = await resolveLegacyCharset(env);
   const lower = path.toLowerCase();
 
   if (lower.endsWith('.zip')) {
-    const r = await parseZipEntries(source, fileSize);
+    const r = await parseZipEntries(source, fileSize, legacyCharset);
     return { ...r, format: 'zip' };
   }
   if (lower.endsWith('.tar')) {
-    const r = await parseTarEntries(source, fileSize);
+    const r = await parseTarEntries(source, fileSize, legacyCharset);
     return { ...r, format: 'tar' };
   }
   if (lower.endsWith('.tgz') || lower.endsWith('.tar.gz')) {
     const all = await fetchAll(source);
     const gunzipped = gunzipSync(all);
-    const r = await parseTarEntriesFromBuffer(gunzipped);
+    const r = await parseTarEntriesFromBuffer(gunzipped, legacyCharset);
     return { ...r, format: 'tgz' };
   }
   if (lower.endsWith('.gz')) {
@@ -394,16 +454,16 @@ export async function parseArchive(path: string, env: Env): Promise<ParsedArchiv
   throw new Error('unsupported archive format');
 }
 
-async function parseTarEntriesFromBuffer(buf: Uint8Array): Promise<{ entries: ArchiveEntry[]; encrypted: boolean; comment: string }> {
+async function parseTarEntriesFromBuffer(buf: Uint8Array, legacyCharset: string): Promise<{ entries: ArchiveEntry[]; encrypted: boolean; comment: string }> {
   const entries: ArchiveEntry[] = [];
   let offset = 0;
   while (offset + 512 <= buf.length) {
     const header = buf.subarray(offset, offset + 512);
     if (header.every(b => b === 0)) break;
-    const name = decodeName(header.subarray(0, 100)).replace(/\0.*$/, '');
-    const prefix = decodeName(header.subarray(345, 500)).replace(/\0.*$/, '');
+    const name = decodeName(header.subarray(0, 100), legacyCharset).replace(/\0.*$/, '');
+    const prefix = decodeName(header.subarray(345, 500), legacyCharset).replace(/\0.*$/, '');
     const full = prefix ? `${prefix}/${name}` : name;
-    const sizeStr = decodeName(header.subarray(124, 136)).replace(/[^0-9o]/gi, '');
+    const sizeStr = decodeName(header.subarray(124, 136), legacyCharset).replace(/[^0-9o]/gi, '');
     let size = 0;
     try { size = parseInt(sizeStr, 8) || 0; } catch { size = 0; }
     const typeflag = String.fromCharCode(header[156] || 0);
@@ -418,17 +478,18 @@ async function parseTarEntriesFromBuffer(buf: Uint8Array): Promise<{ entries: Ar
 export async function extractArchiveEntry(path: string, innerPath: string, env: Env): Promise<Uint8Array> {
   const source = await getArchiveSource(path, env);
   const fileSize = await getFileSize(source);
+  const legacyCharset = await resolveLegacyCharset(env);
   const lower = path.toLowerCase();
   const target = fixPath(innerPath);
 
   if (lower.endsWith('.zip')) {
-    const { entries } = await parseZipEntries(source, fileSize);
+    const { entries } = await parseZipEntries(source, fileSize, legacyCharset);
     const entry = entries.find(e => fixPath(e.name) === target);
     if (!entry) throw new Error('file not found in archive');
     return extractZipEntry(source, entry);
   }
   if (lower.endsWith('.tar')) {
-    const { entries } = await parseTarEntries(source, fileSize);
+    const { entries } = await parseTarEntries(source, fileSize, legacyCharset);
     const entry = entries.find(e => fixPath(e.name) === target);
     if (!entry) throw new Error('file not found in archive');
     return extractTarEntry(source, entry);
@@ -436,7 +497,7 @@ export async function extractArchiveEntry(path: string, innerPath: string, env: 
   if (lower.endsWith('.tgz') || lower.endsWith('.tar.gz')) {
     const all = await fetchAll(source);
     const gunzipped = gunzipSync(all);
-    const { entries } = await parseTarEntriesFromBuffer(gunzipped);
+    const { entries } = await parseTarEntriesFromBuffer(gunzipped, legacyCharset);
     const entry = entries.find(e => fixPath(e.name) === target);
     if (!entry) throw new Error('file not found in archive');
     return gunzipped.slice(entry.dataOffset!, entry.dataOffset! + entry.size);

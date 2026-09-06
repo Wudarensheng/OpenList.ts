@@ -262,6 +262,20 @@ export async function initializeDatabase(env: Env): Promise<void> {
     ).bind(0xFFFFFFFF, 'admin').run();
 
     // Insert default settings if not exist
+    // iframe_previews: extra in-app preview tabs (Office/PDF) rendered as
+    // <iframe>. Mirrors the upstream OpenList default. Supported placeholders
+    // in a viewer URL: $url (raw_url), $e_url (encodeURIComponent(raw_url)).
+    const defaultIframePreviews = JSON.stringify({
+      'doc,docx,xls,xlsx,ppt,pptx': {
+        Microsoft: 'https://view.officeapps.live.com/op/view.aspx?src=$e_url',
+        Google: 'https://docs.google.com/gview?url=$e_url&embedded=true',
+      },
+      pdf: {
+        'PDF.js': 'https://res.oplist.org.cn/pdf.js/web/viewer.html?file=$e_url',
+        Browser: '$url',
+      },
+    }, null, 2);
+
     const defaultSettings = [
       // SITE
       { key: 'site_title', value: 'OpenList', help: 'Site title', type: 'string', group: 1 },
@@ -289,6 +303,9 @@ export async function initializeDatabase(env: Env): Promise<void> {
       { key: 'video_autoplay', value: 'false', help: 'Video autoplay', type: 'bool', group: 3 },
       { key: 'preview_download_by_default', value: 'false', help: 'Preview download by default', type: 'bool', group: 3 },
       { key: 'preview_archives_by_default', value: 'false', help: 'Preview archives by default', type: 'bool', group: 3 },
+      { key: 'non_efs_zip_encoding', value: 'GB18030', help: 'Charset for zip entry names without the UTF-8 flag (e.g. GB18030)', type: 'string', group: 3 },
+      { key: 'iframe_previews', value: defaultIframePreviews, help: 'Extra iframe previews (JSON: ext or /regex/ -> {name: url with $url/$e_url})', type: 'text', group: 3 },
+      { key: 'external_previews', value: '{}', help: 'External previews (JSON, same shape as iframe_previews)', type: 'text', group: 3 },
       { key: 'readme_autorender', value: 'true', help: 'Auto-render README', type: 'bool', group: 3 },
       // GLOBAL
       { key: 'hide_files', value: '', help: 'Hide files matching regex (one per line)', type: 'text', group: 4 },

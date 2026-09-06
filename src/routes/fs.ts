@@ -21,6 +21,18 @@ import {
   releaseLock,
 } from '../cache';
 
+// Office/PDF documents are rendered in-app by browser viewers (docx-preview,
+// ExcelJS, pptxjs, pdf.js / native <iframe>) that fetch the raw bytes. Those
+// fetches must not hit a cross-origin provider URL (no CORS), so such files:
+//   - are NOT classified as TEXT (avoids the broken text/markdown tabs), and
+//   - get a same-origin proxied `raw_url`.
+const DOC_PREVIEW_EXTS = new Set(['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'pdf']);
+
+function isDocPreviewName(name: string): boolean {
+  const ext = (name || '').split('.').pop()?.toLowerCase() || '';
+  return DOC_PREVIEW_EXTS.has(ext);
+}
+
 export async function handleFsRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -664,9 +676,16 @@ async function handleGetFile(request: Request, env: Env, user: any, preBody?: an
       let linkUrl = '';
       const isDir = cachedFile.is_folder === 1;
       if (!isDir) {
-        const cachedLinkResult = await getCachedLink(storage.id, path, env);
-        if (cachedLinkResult) linkUrl = cachedLinkResult.url;
-        else linkUrl = await buildRawUrl(path, storage, env);
+        // Office/PDF files are fetched by in-app viewers -> they need a
+        // same-origin proxied URL (a provider link would be cross-origin and
+        // fail CORS). Everything else may use the cached direct link.
+        if (isDocPreviewName(cachedFile.name)) {
+          linkUrl = await buildRawUrl(path, storage, env);
+        } else {
+          const cachedLinkResult = await getCachedLink(storage.id, path, env);
+          if (cachedLinkResult) linkUrl = cachedLinkResult.url;
+          else linkUrl = await buildRawUrl(path, storage, env);
+        }
       }
 
       return jsonResponse({
@@ -717,9 +736,13 @@ async function handleGetFile(request: Request, env: Env, user: any, preBody?: an
         let linkUrl = '';
         const isDir = retryFile.is_folder === 1;
         if (!isDir) {
-          const cachedLinkResult = await getCachedLink(storage.id, path, env);
-          if (cachedLinkResult) linkUrl = cachedLinkResult.url;
-          else linkUrl = await buildRawUrl(path, storage, env);
+          if (isDocPreviewName(retryFile.name)) {
+            linkUrl = await buildRawUrl(path, storage, env);
+          } else {
+            const cachedLinkResult = await getCachedLink(storage.id, path, env);
+            if (cachedLinkResult) linkUrl = cachedLinkResult.url;
+            else linkUrl = await buildRawUrl(path, storage, env);
+          }
         }
 
         return jsonResponse({
@@ -1766,6 +1789,19 @@ async function buildRawUrl(path: string, storage: any, env: Env): Promise<string
     return url;
   }
 
+  if (isDocPreviewName(path)) {
+    // Office/PDF documents are opened by in-app viewers that fetch the raw
+    // bytes from the same origin (docx-preview / ExcelJS / pptxjs / pdf.js /
+    // native <iframe>). Stream them through the worker so the fetch is not
+    // cross-origin; the CORS header is added in download.ts proxyLink.
+    let url = `/p/${encodePath(path.replace(/^\//, ''))}?type=preview`;
+    if (signEnabled) {
+      const sign = await signData(path, await getSignExpire(env), env);
+      url += `&sign=${sign}`;
+    }
+    return url;
+  }
+
   let url = `/d/${encodePath(path.replace(/^\//, ''))}`;
   if (signEnabled) {
     const sign = await signData(path, await getSignExpire(env), env);
@@ -1779,7 +1815,7 @@ function getFileType(name: string): number {
   const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico'];
   const videoExts = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'webm'];
   const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'wma'];
-  const textExts = ['doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md'];
+  const textExts = ['txt', 'md'];
 
   if (imageExts.includes(ext)) return 5; // IMAGE
   if (videoExts.includes(ext)) return 2; // VIDEO

@@ -63,6 +63,9 @@ async function handleArchiveDownload(rawPath: string, request: Request, env: Env
     outHeaders.set('Accept-Ranges', 'bytes');
     outHeaders.set('Referrer-Policy', 'no-referrer');
     outHeaders.set('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
+    // Allow cross-origin in-browser viewers (pdf.js, docx-preview, ExcelJS...)
+    // to fetch the raw file bytes.
+    outHeaders.set('Access-Control-Allow-Origin', '*');
 
     const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_');
     const disposition = type === 'preview'
@@ -113,6 +116,12 @@ function mimeFromName(name: string): string {
     mp4: 'video/mp4', webm: 'video/webm', pdf: 'application/pdf',
     txt: 'text/plain', md: 'text/markdown', json: 'application/json',
     zip: 'application/zip', html: 'text/html', css: 'text/css', js: 'application/javascript',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   };
   return map[ext] || 'application/octet-stream';
 }
@@ -248,7 +257,13 @@ async function proxyLink(link: { url: string; header?: Record<string, string> },
   }
 
   const filename = rawPath.split('/').pop() || 'file';
-  const contentType = upstream.headers.get('Content-Type') || 'application/octet-stream';
+  let contentType = upstream.headers.get('Content-Type') || '';
+  if (!contentType || /^application\/octet-stream/i.test(contentType)) {
+    // Providers often serve objects as application/octet-stream. Inline
+    // viewers (PDF in <iframe>, pdf.js, <video>) need the real type, so fall
+    // back to the extension-based MIME.
+    contentType = mimeFromName(filename) || contentType || 'application/octet-stream';
+  }
 
   const outHeaders = new Headers();
   outHeaders.set('Content-Type', contentType);
@@ -269,6 +284,8 @@ async function proxyLink(link: { url: string; header?: Record<string, string> },
   }
   outHeaders.set('Referrer-Policy', 'no-referrer');
   outHeaders.set('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
+  // Allow cross-origin in-browser viewers (pdf.js etc.) to fetch the file.
+  outHeaders.set('Access-Control-Allow-Origin', '*');
 
   // RFC 6266: filename must be ASCII; non-ASCII goes in filename*
   const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_');

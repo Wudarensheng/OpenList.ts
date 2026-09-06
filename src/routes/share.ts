@@ -20,6 +20,16 @@ import { getAuthUser, can, PERM } from '../utils/auth';
 const ID_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const VALID_ID_RE = /^[\w\u4e00-\u9fff-]+$/;
 
+// Office/PDF files are opened by in-app viewers that fetch the raw bytes from
+// the same origin, and inline-previewed with type=preview (Content-Disposition
+// inline). This must stay in sync with fs.ts isDocPreviewName().
+const DOC_PREVIEW_EXTS = new Set(['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'pdf']);
+
+function isDocPreviewName(name: string): boolean {
+  const ext = (name || '').split('.').pop()?.toLowerCase() || '';
+  return DOC_PREVIEW_EXTS.has(ext);
+}
+
 function randomId(len: number): string {
   let s = '';
   const arr = crypto.getRandomValues(new Uint8Array(len));
@@ -591,7 +601,7 @@ function objToShareItem(obj: any, realPath: string, share: Share, sid: string, s
     hashinfo: obj.hash_info || '',
     hash_info: {},
     // share download path
-    raw_url: `/sd/${sid}/${sharePath === '/' ? '' : sharePath.slice(1)}${fileName}`,
+    raw_url: `/sd/${sid}/${sharePath === '/' ? '' : sharePath.slice(1)}${fileName}${isDocPreviewName(fileName) ? '?type=preview' : ''}`,
     readme: '',
     header: '',
     provider: 'unknown',
@@ -606,7 +616,7 @@ function getShareFileType(name: string): number {
   const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico'];
   const videoExts = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'webm'];
   const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'wma'];
-  const textExts = ['doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md'];
+  const textExts = ['txt', 'md'];
   if (imageExts.includes(ext)) return 5;
   if (videoExts.includes(ext)) return 2;
   if (audioExts.includes(ext)) return 3;
@@ -662,7 +672,7 @@ export async function getShareFile(env: Env, sid: string, sharePath: string, pwd
       type: obj.is_dir ? 1 : getShareFileType(fileName),
       hashinfo: obj.hash_info || '',
       hash_info: {},
-      raw_url: obj.is_dir ? '' : `/sd/${sid}/${sharePath.slice(1)}`,
+      raw_url: obj.is_dir ? '' : `/sd/${sid}/${sharePath.slice(1)}${isDocPreviewName(fileName) ? '?type=preview' : ''}`,
       readme: share.readme || '',
       header: share.header || '',
       provider: 'unknown',
@@ -797,6 +807,8 @@ async function proxyShareLink(link: { url: string; header?: Record<string, strin
   }
   outHeaders.set('Referrer-Policy', 'no-referrer');
   outHeaders.set('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
+  // Allow cross-origin in-browser viewers (pdf.js etc.) to fetch the file.
+  outHeaders.set('Access-Control-Allow-Origin', '*');
 
   const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_');
   const disposition = type === 'preview'
