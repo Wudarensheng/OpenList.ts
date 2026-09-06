@@ -96,6 +96,11 @@ async function ensureDrivers(): Promise<void> {
     quarkMod,
     teraboxMod,
     wpsMod,
+    pan115OpenMod,
+    thunderMod,
+    thunderExpertMod,
+    weiyunMod,
+    wopanMod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -124,6 +129,11 @@ async function ensureDrivers(): Promise<void> {
     import('./quark'),
     import('./terabox'),
     import('./wps'),
+    import('./115'),
+    import('./thunder'),
+    import('./thunder_expert'),
+    import('./weiyun'),
+    import('./wopan'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -169,6 +179,21 @@ async function ensureDrivers(): Promise<void> {
   }
   if (wpsMod.wpsConfig) {
     registerDriver(wpsMod.WpsDriver, wpsMod.wpsConfig, wpsMod.wpsAdditional);
+  }
+  if (pan115OpenMod.pan115OpenConfig) {
+    registerDriver(pan115OpenMod.Pan115OpenDriver, pan115OpenMod.pan115OpenConfig, pan115OpenMod.pan115OpenAdditional);
+  }
+  if (thunderMod.thunderConfig) {
+    registerDriver(thunderMod.ThunderDriver, thunderMod.thunderConfig, thunderMod.thunderAdditional);
+  }
+  if (thunderExpertMod.thunderExpertConfig) {
+    registerDriver(thunderExpertMod.ThunderExpertDriver, thunderExpertMod.thunderExpertConfig, thunderExpertMod.thunderExpertAdditional);
+  }
+  if (weiyunMod.weiyunConfig) {
+    registerDriver(weiyunMod.WeiyunDriver, weiyunMod.weiyunConfig, weiyunMod.weiyunAdditional);
+  }
+  if (wopanMod.wopanConfig) {
+    registerDriver(wopanMod.WoPanDriver, wopanMod.wopanConfig, wopanMod.wopanAdditional);
   }
 }
 
