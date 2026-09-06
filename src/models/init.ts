@@ -265,7 +265,20 @@ export async function initializeDatabase(env: Env): Promise<void> {
     // iframe_previews: extra in-app preview tabs (Office/PDF) rendered as
     // <iframe>. Mirrors the upstream OpenList default. Supported placeholders
     // in a viewer URL: $url (raw_url), $e_url (encodeURIComponent(raw_url)).
+    // Browser-native PDF first: it works even on localhost/private hosts and
+    // has no CORS dependency (PDF.js needs a public HTTPS site).
     const defaultIframePreviews = JSON.stringify({
+      'doc,docx,xls,xlsx,ppt,pptx': {
+        Microsoft: 'https://view.officeapps.live.com/op/view.aspx?src=$e_url',
+        Google: 'https://docs.google.com/gview?url=$e_url&embedded=true',
+      },
+      pdf: {
+        Browser: '$url',
+        'PDF.js': 'https://res.oplist.org.cn/pdf.js/web/viewer.html?file=$e_url',
+      },
+    }, null, 2);
+    // The default shipped before Browser-native PDF was put first.
+    const previousIframePreviewsDefault = JSON.stringify({
       'doc,docx,xls,xlsx,ppt,pptx': {
         Microsoft: 'https://view.officeapps.live.com/op/view.aspx?src=$e_url',
         Google: 'https://docs.google.com/gview?url=$e_url&embedded=true',
@@ -348,6 +361,22 @@ export async function initializeDatabase(env: Env): Promise<void> {
           'INSERT INTO settings (key, value, help, type, options, group_id, flag) VALUES (?, ?, ?, ?, ?, ?, ?)'
         ).bind(setting.key, setting.value, setting.help, setting.type, setting.options || '', setting.group, setting.flag || 0).run();
       }
+    }
+
+    // Migration: iframe_previews was first shipped with PDF.js listed before
+    // the Browser-native entry. Replace that exact previous default so the
+    // Browser-native PDF viewer becomes the default preview tab.
+    try {
+      const ipRow: any = await env.DB.prepare(
+        'SELECT value FROM settings WHERE key = ?'
+      ).bind('iframe_previews').first();
+      if (ipRow && ipRow.value === previousIframePreviewsDefault) {
+        await env.DB.prepare(
+          'UPDATE settings SET value = ? WHERE key = ?'
+        ).bind(defaultIframePreviews, 'iframe_previews').run();
+      }
+    } catch {
+      // ignore
     }
 
     // Migration: SSO settings belong to group 7 (SSO), not group 6 (INDEX).
