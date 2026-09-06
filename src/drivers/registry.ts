@@ -93,6 +93,9 @@ async function ensureDrivers(): Promise<void> {
     aliyundriveShareMod,
     onedriveSharelinkMod,
     pikpakShareMod,
+    quarkMod,
+    teraboxMod,
+    wpsMod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -118,6 +121,9 @@ async function ensureDrivers(): Promise<void> {
     import('./aliyundrive_share'),
     import('./onedrive_sharelink'),
     import('./pikpak_share'),
+    import('./quark'),
+    import('./terabox'),
+    import('./wps'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -154,6 +160,15 @@ async function ensureDrivers(): Promise<void> {
   }
   if (pikpakShareMod.pikpakShareConfig) {
     registerDriver(pikpakShareMod.PikPakShareDriver, pikpakShareMod.pikpakShareConfig, pikpakShareMod.pikpakShareAdditional);
+  }
+  if (quarkMod.quarkConfig) {
+    registerDriver(quarkMod.QuarkDriver, quarkMod.quarkConfig, quarkMod.quarkAdditional);
+  }
+  if (teraboxMod.teraboxConfig) {
+    registerDriver(teraboxMod.TeraboxDriver, teraboxMod.teraboxConfig, teraboxMod.teraboxAdditional);
+  }
+  if (wpsMod.wpsConfig) {
+    registerDriver(wpsMod.WpsDriver, wpsMod.wpsConfig, wpsMod.wpsAdditional);
   }
 }
 
