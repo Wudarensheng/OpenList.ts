@@ -88,6 +88,11 @@ async function ensureDrivers(): Promise<void> {
     baiduNetdiskMod,
     yun139Mod,
     lanzouMod,
+    pan123ShareMod,
+    share115Mod,
+    aliyundriveShareMod,
+    onedriveSharelinkMod,
+    pikpakShareMod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -108,6 +113,11 @@ async function ensureDrivers(): Promise<void> {
     import('./baidu_netdisk'),
     import('./139'),
     import('./lanzou'),
+    import('./123_share'),
+    import('./115_share'),
+    import('./aliyundrive_share'),
+    import('./onedrive_sharelink'),
+    import('./pikpak_share'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -130,6 +140,21 @@ async function ensureDrivers(): Promise<void> {
   if (baiduNetdiskMod.baiduNetdiskConfig) registerDriver(baiduNetdiskMod.BaiduNetdiskDriver, baiduNetdiskMod.baiduNetdiskConfig, baiduNetdiskMod.baiduNetdiskAdditional);
   if (yun139Mod.yun139Config) registerDriver(yun139Mod.Yun139Driver, yun139Mod.yun139Config, yun139Mod.yun139Additional);
   if (lanzouMod.lanzouConfig) registerDriver(lanzouMod.LanZouDriver, lanzouMod.lanzouConfig, lanzouMod.lanzouAdditional);
+  if (pan123ShareMod.pan123ShareConfig) {
+    registerDriver(pan123ShareMod.Pan123ShareDriver, pan123ShareMod.pan123ShareConfig, pan123ShareMod.pan123ShareAdditional);
+  }
+  if (share115Mod.pan115ShareConfig) {
+    registerDriver(share115Mod.Pan115ShareDriver, share115Mod.pan115ShareConfig, share115Mod.pan115ShareAdditional);
+  }
+  if (aliyundriveShareMod.aliyundriveShareConfig) {
+    registerDriver(aliyundriveShareMod.AliyundriveShareDriver, aliyundriveShareMod.aliyundriveShareConfig, aliyundriveShareMod.aliyundriveShareAdditional);
+  }
+  if (onedriveSharelinkMod.onedriveSharelinkConfig) {
+    registerDriver(onedriveSharelinkMod.OnedriveSharelinkDriver, onedriveSharelinkMod.onedriveSharelinkConfig, onedriveSharelinkMod.onedriveSharelinkAdditional);
+  }
+  if (pikpakShareMod.pikpakShareConfig) {
+    registerDriver(pikpakShareMod.PikPakShareDriver, pikpakShareMod.pikpakShareConfig, pikpakShareMod.pikpakShareAdditional);
+  }
 }
 
 /**
