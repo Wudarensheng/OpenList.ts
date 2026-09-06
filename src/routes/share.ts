@@ -10,7 +10,7 @@
  */
 
 import { Env } from '../types';
-import { jsonResponse } from '../utils/response';
+import { jsonResponse, corsPreflight, STREAM_CORS_HEADERS } from '../utils/response';
 import { getStorageForPath, getRelativePath } from './fs';
 import { getDriverInstance } from '../drivers/registry';
 import { getCachedLink, cacheLink, acquireLock, releaseLock } from '../cache';
@@ -501,7 +501,7 @@ export async function resolveSharePath(env: Env, sid: string, sharePath: string,
 }
 
 // Public share list (used by /api/fs/list when path starts with a share id)
-export async function listShare(env: Env, sid: string, sharePath: string, pwd?: string): Promise<{ content: any[]; readme: string; header: string } | null> {
+export async function listShare(env: Env, sid: string, sharePath: string, pwd: string | undefined, origin: string): Promise<{ content: any[]; readme: string; header: string } | null> {
   const share = await getPublicShare(env, sid, pwd);
   if (!share) return null;
 
@@ -525,10 +525,10 @@ export async function listShare(env: Env, sid: string, sharePath: string, pwd?: 
           const result = await driver.list(relativePath, addition);
           const objs = Array.isArray(result.content) ? result.content : [];
           for (const o of objs) {
-            items.push(objToShareItem(o, realPath, share, sid, sharePath));
+            items.push(objToShareItem(o, realPath, share, sid, sharePath, origin));
           }
         } else {
-          items.push(objToShareItem(obj, realPath, share, sid, sharePath));
+          items.push(objToShareItem(obj, realPath, share, sid, sharePath, origin));
         }
       }
     } catch (e) {
@@ -546,7 +546,7 @@ export async function listShare(env: Env, sid: string, sharePath: string, pwd?: 
         const result = await driver.list(relativePath, addition);
         const objs = Array.isArray(result.content) ? result.content : [];
         for (const obj of objs) {
-          items.push(objToShareItem(obj, realPath, share, sid, sharePath));
+          items.push(objToShareItem(obj, realPath, share, sid, sharePath, origin));
         }
       }
     } catch (e) {
@@ -563,7 +563,7 @@ export async function listShare(env: Env, sid: string, sharePath: string, pwd?: 
         const driver = await getDriverInstance(storage.driver, addition);
         const relativePath = getRelativePath(f, storage.mount_path);
         const obj = await driver.get(relativePath, addition);
-        items.push(objToShareItem(obj, f, share, sid, sharePath));
+        items.push(objToShareItem(obj, f, share, sid, sharePath, origin));
       } catch {
         continue;
       }
@@ -584,7 +584,7 @@ export async function listShare(env: Env, sid: string, sharePath: string, pwd?: 
   return { content: items, readme: share.readme || '', header: share.header || '' };
 }
 
-function objToShareItem(obj: any, realPath: string, share: Share, sid: string, sharePath: string): any {
+function objToShareItem(obj: any, realPath: string, share: Share, sid: string, sharePath: string, origin: string): any {
   const fileName = obj.name || realPath.split('/').pop() || '';
   // Virtual path within the share: for the root of a multi-file share, the
   // item path is /sid/<name>; inside a folder it is /sid/<sharePath>/<name>.
@@ -600,8 +600,8 @@ function objToShareItem(obj: any, realPath: string, share: Share, sid: string, s
     type: obj.is_dir ? 1 : getShareFileType(fileName),
     hashinfo: obj.hash_info || '',
     hash_info: {},
-    // share download path
-    raw_url: `/sd/${sid}/${sharePath === '/' ? '' : sharePath.slice(1)}${fileName}${isDocPreviewName(fileName) ? '?type=preview' : ''}`,
+    // share download path (absolute so in-app/external viewers can use it)
+    raw_url: `${origin}/sd/${sid}/${sharePath === '/' ? '' : sharePath.slice(1)}${fileName}${isDocPreviewName(fileName) ? '?type=preview' : ''}`,
     readme: '',
     header: '',
     provider: 'unknown',
@@ -625,7 +625,7 @@ function getShareFileType(name: string): number {
 }
 
 // Public share get (used by /api/fs/get)
-export async function getShareFile(env: Env, sid: string, sharePath: string, pwd?: string): Promise<any | null> {
+export async function getShareFile(env: Env, sid: string, sharePath: string, pwd: string | undefined, origin: string): Promise<any | null> {
   const share = await getPublicShare(env, sid, pwd);
   if (!share) return null;
 
@@ -672,7 +672,7 @@ export async function getShareFile(env: Env, sid: string, sharePath: string, pwd
       type: obj.is_dir ? 1 : getShareFileType(fileName),
       hashinfo: obj.hash_info || '',
       hash_info: {},
-      raw_url: obj.is_dir ? '' : `/sd/${sid}/${sharePath.slice(1)}${isDocPreviewName(fileName) ? '?type=preview' : ''}`,
+      raw_url: obj.is_dir ? '' : `${origin}/sd/${sid}/${sharePath.slice(1)}${isDocPreviewName(fileName) ? '?type=preview' : ''}`,
       readme: share.readme || '',
       header: share.header || '',
       provider: 'unknown',
@@ -690,6 +690,10 @@ export async function getShareFile(env: Env, sid: string, sharePath: string, pwd
 export async function handleShareDownload(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
+
+  // CORS preflight for cross-origin in-app viewers (pdf.js etc.).
+  if (request.method === 'OPTIONS' && path.startsWith('/sd/')) return corsPreflight();
+
   const pwd = url.searchParams.get('pwd') || undefined;
   const type = url.searchParams.get('type') || '';
 
@@ -808,7 +812,9 @@ async function proxyShareLink(link: { url: string; header?: Record<string, strin
   outHeaders.set('Referrer-Policy', 'no-referrer');
   outHeaders.set('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
   // Allow cross-origin in-browser viewers (pdf.js etc.) to fetch the file.
-  outHeaders.set('Access-Control-Allow-Origin', '*');
+  for (const [k, v] of Object.entries(STREAM_CORS_HEADERS)) {
+    outHeaders.set(k, v);
+  }
 
   const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_');
   const disposition = type === 'preview'

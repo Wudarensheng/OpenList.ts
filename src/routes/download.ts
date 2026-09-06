@@ -11,10 +11,17 @@ import { getDriverInstance } from '../drivers/registry';
 import { getCachedLink, cacheLink, acquireLock, releaseLock } from '../cache';
 import { verifySign, isSignAll } from '../utils/sign';
 import { extractArchiveEntry } from '../utils/archive';
+import { corsPreflight, STREAM_CORS_HEADERS } from '../utils/response';
 
 export async function handleDownloadRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
+
+  // CORS preflight for cross-origin in-app viewers (pdf.js issues ranged GETs).
+  if (request.method === 'OPTIONS') {
+    const prefixes = ['/d/', '/p/', '/ad/', '/ap/', '/ae/'];
+    if (prefixes.some(p => path.startsWith(p))) return corsPreflight();
+  }
 
   if (path.startsWith('/d/')) {
     const rawPath = decodePath(path.substring(3));
@@ -65,7 +72,9 @@ async function handleArchiveDownload(rawPath: string, request: Request, env: Env
     outHeaders.set('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
     // Allow cross-origin in-browser viewers (pdf.js, docx-preview, ExcelJS...)
     // to fetch the raw file bytes.
-    outHeaders.set('Access-Control-Allow-Origin', '*');
+    for (const [k, v] of Object.entries(STREAM_CORS_HEADERS)) {
+      outHeaders.set(k, v);
+    }
 
     const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_');
     const disposition = type === 'preview'
@@ -285,7 +294,9 @@ async function proxyLink(link: { url: string; header?: Record<string, string> },
   outHeaders.set('Referrer-Policy', 'no-referrer');
   outHeaders.set('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
   // Allow cross-origin in-browser viewers (pdf.js etc.) to fetch the file.
-  outHeaders.set('Access-Control-Allow-Origin', '*');
+  for (const [k, v] of Object.entries(STREAM_CORS_HEADERS)) {
+    outHeaders.set(k, v);
+  }
 
   // RFC 6266: filename must be ASCII; non-ASCII goes in filename*
   const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_');

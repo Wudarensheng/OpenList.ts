@@ -214,7 +214,8 @@ async function tryShareList(request: Request, body: any, env: Env): Promise<Resp
   // falling through to normal storage resolution.
   if (await shareExists(env, parsed.sid)) {
     const pwd = body?.password;
-    const result = await listShare(env, parsed.sid, parsed.sharePath, pwd);
+    const origin = new URL(request.url).origin;
+    const result = await listShare(env, parsed.sid, parsed.sharePath, pwd, origin);
     if (!result) {
       return jsonResponse({ code: 403, message: 'Share is invalid or password is required' }, 403);
     }
@@ -242,7 +243,8 @@ async function tryShareGet(request: Request, body: any, env: Env): Promise<Respo
 
   if (await shareExists(env, parsed.sid)) {
     const pwd = body?.password;
-    const file = await getShareFile(env, parsed.sid, parsed.sharePath, pwd);
+    const origin = new URL(request.url).origin;
+    const file = await getShareFile(env, parsed.sid, parsed.sharePath, pwd, origin);
     if (!file) {
       return jsonResponse({ code: 403, message: 'Share is invalid or password is required' }, 403);
     }
@@ -594,6 +596,7 @@ async function handleListFiles(request: Request, env: Env, user: any, preBody?: 
 async function handleGetFile(request: Request, env: Env, user: any, preBody?: any): Promise<Response> {
   try {
     const body = preBody || await request.json() as any;
+    const origin = new URL(request.url).origin;
     const path = body.path;
     const userRole = user.role;
     const signExpire = await getSignExpire(env);
@@ -680,11 +683,11 @@ async function handleGetFile(request: Request, env: Env, user: any, preBody?: an
         // same-origin proxied URL (a provider link would be cross-origin and
         // fail CORS). Everything else may use the cached direct link.
         if (isDocPreviewName(cachedFile.name)) {
-          linkUrl = await buildRawUrl(path, storage, env);
+          linkUrl = await buildRawUrl(path, storage, env, origin);
         } else {
           const cachedLinkResult = await getCachedLink(storage.id, path, env);
           if (cachedLinkResult) linkUrl = cachedLinkResult.url;
-          else linkUrl = await buildRawUrl(path, storage, env);
+          else linkUrl = await buildRawUrl(path, storage, env, origin);
         }
       }
 
@@ -737,11 +740,11 @@ async function handleGetFile(request: Request, env: Env, user: any, preBody?: an
         const isDir = retryFile.is_folder === 1;
         if (!isDir) {
           if (isDocPreviewName(retryFile.name)) {
-            linkUrl = await buildRawUrl(path, storage, env);
+            linkUrl = await buildRawUrl(path, storage, env, origin);
           } else {
             const cachedLinkResult = await getCachedLink(storage.id, path, env);
             if (cachedLinkResult) linkUrl = cachedLinkResult.url;
-            else linkUrl = await buildRawUrl(path, storage, env);
+            else linkUrl = await buildRawUrl(path, storage, env, origin);
           }
         }
 
@@ -803,7 +806,7 @@ async function handleGetFile(request: Request, env: Env, user: any, preBody?: an
           type: isDir ? 1 : getFileType(file.name),
           hashinfo: file.hash_info || '',
           hash_info: {},
-          raw_url: isDir ? '' : await buildRawUrl(path, storage, env),
+          raw_url: isDir ? '' : await buildRawUrl(path, storage, env, origin),
           readme: metaReadme,
           header: metaHeader,
           provider: storage.driver,
@@ -1569,6 +1572,7 @@ async function handleGetDirectUploadInfo(request: Request, env: Env): Promise<Re
 async function handleArchiveMeta(request: Request, env: Env, user: any): Promise<Response> {
   try {
     const body = await request.json() as any;
+    const origin = new URL(request.url).origin;
     const path = body.path;
     if (!path) return jsonResponse({ code: 400, message: 'Path is required' }, 400);
 
@@ -1586,7 +1590,7 @@ async function handleArchiveMeta(request: Request, env: Env, user: any): Promise
     const metaEncrypt = isMetaEncrypt(meta, path);
     const signNeeded = !!(storage?.enable_sign || signAll || metaEncrypt);
     const sign = signNeeded ? await signData(path, signExpire, env) : '';
-    const rawUrl = await buildRawUrl(path, storage, env);
+    const rawUrl = await buildRawUrl(path, storage, env, origin);
 
     // The frontend appends the archive's sign to the /ae/ (inner-file) URL, so
     // propagate it onto every tree node.
@@ -1774,7 +1778,10 @@ function encodePath(path: string): string {
 }
 
 // Build a frontend-facing raw download URL for a file path.
-async function buildRawUrl(path: string, storage: any, env: Env): Promise<string> {
+// `origin` (e.g. https://files.example.com) is required: in-app preview
+// templates (Microsoft/Google office viewer, pdf.js) are iframed from other
+// origins and pass raw_url verbatim, so it must be absolute.
+async function buildRawUrl(path: string, storage: any, env: Env, origin: string): Promise<string> {
   const signAll = await isSignAll(env);
   const signEnabled = !!storage.enable_sign || signAll;
 
@@ -1791,10 +1798,10 @@ async function buildRawUrl(path: string, storage: any, env: Env): Promise<string
 
   if (isDocPreviewName(path)) {
     // Office/PDF documents are opened by in-app viewers that fetch the raw
-    // bytes from the same origin (docx-preview / ExcelJS / pptxjs / pdf.js /
-    // native <iframe>). Stream them through the worker so the fetch is not
-    // cross-origin; the CORS header is added in download.ts proxyLink.
-    let url = `/p/${encodePath(path.replace(/^\//, ''))}?type=preview`;
+    // bytes (docx-preview / ExcelJS / pptxjs / pdf.js / native <iframe>).
+    // Stream them through the worker so the fetch is not cross-origin; the
+    // CORS header is added in download.ts proxyLink.
+    let url = `${origin}/p/${encodePath(path.replace(/^\//, ''))}?type=preview`;
     if (signEnabled) {
       const sign = await signData(path, await getSignExpire(env), env);
       url += `&sign=${sign}`;
@@ -1802,7 +1809,7 @@ async function buildRawUrl(path: string, storage: any, env: Env): Promise<string
     return url;
   }
 
-  let url = `/d/${encodePath(path.replace(/^\//, ''))}`;
+  let url = `${origin}/d/${encodePath(path.replace(/^\//, ''))}`;
   if (signEnabled) {
     const sign = await signData(path, await getSignExpire(env), env);
     url += `?sign=${sign}`;
