@@ -101,6 +101,9 @@ async function ensureDrivers(): Promise<void> {
     thunderExpertMod,
     weiyunMod,
     wopanMod,
+    githubMod,
+    mediatrackMod,
+    megaMod,
   ] = await Promise.all([
     import('./s3'),
     import('./onedrive'),
@@ -134,6 +137,9 @@ async function ensureDrivers(): Promise<void> {
     import('./thunder_expert'),
     import('./weiyun'),
     import('./wopan'),
+    import('./github'),
+    import('./mediatrack'),
+    import('./mega'),
   ]);
 
   // Explicit registration calls in case top-level side-effects didn't run
@@ -194,6 +200,15 @@ async function ensureDrivers(): Promise<void> {
   }
   if (wopanMod.wopanConfig) {
     registerDriver(wopanMod.WoPanDriver, wopanMod.wopanConfig, wopanMod.wopanAdditional);
+  }
+  if (githubMod.githubConfig) {
+    registerDriver(githubMod.GithubDriver, githubMod.githubConfig, githubMod.githubAdditional);
+  }
+  if (mediatrackMod.mediatrackConfig) {
+    registerDriver(mediatrackMod.MediatrackDriver, mediatrackMod.mediatrackConfig, mediatrackMod.mediatrackAdditional);
+  }
+  if (megaMod.megaConfig) {
+    registerDriver(megaMod.MegaDriver, megaMod.megaConfig, megaMod.megaAdditional);
   }
 }
 
